@@ -82,30 +82,56 @@ class MTFAnalyzer:
         Detect HH/HL (bullish) or LL/LH (bearish) structure
         Returns: 'bullish', 'bearish', or 'neutral'
         """
-        swing_highs = self.find_swing_highs(candles, lookback)
-        swing_lows = self.find_swing_lows(candles, lookback)
-        
-        if len(swing_highs) < 2 or len(swing_lows) < 2:
+        if len(candles) < 2:
             return 'neutral', {}
         
-        # Get last 2 swing points
-        recent_highs = swing_highs[-2:]
-        recent_lows = swing_lows[-2:]
+        # Simple approach: compare first half vs second half of candles
+        mid = len(candles) // 2
+        if mid == 0:
+            mid = 1
         
-        hh = recent_highs[-1]['price'] > recent_highs[-2]['price']  # Higher High
-        hl = recent_lows[-1]['price'] > recent_lows[-2]['price']    # Higher Low
-        ll = recent_lows[-1]['price'] < recent_lows[-2]['price']    # Lower Low
-        lh = recent_highs[-1]['price'] < recent_highs[-2]['price']  # Lower High
+        first_half = candles[:mid]
+        second_half = candles[mid:]
+        
+        # Get highs and lows from each half
+        first_high = max(c.get('high', 0) for c in first_half)
+        first_low = min(c.get('low', float('inf')) for c in first_half)
+        second_high = max(c.get('high', 0) for c in second_half)
+        second_low = min(c.get('low', float('inf')) for c in second_half)
+        
+        # Also check current price vs open
+        first_price = candles[0].get('open', 0)
+        last_price = candles[-1].get('close', 0)
+        price_change_pct = ((last_price - first_price) / first_price * 100) if first_price > 0 else 0
         
         structure_data = {
-            'swing_highs': recent_highs,
-            'swing_lows': recent_lows,
-            'hh': hh, 'hl': hl, 'll': ll, 'lh': lh
+            'first_high': first_high,
+            'first_low': first_low,
+            'second_high': second_high,
+            'second_low': second_low,
+            'price_change_pct': round(price_change_pct, 2)
         }
+        
+        # Bullish: Higher highs AND higher lows (or strong upward price movement)
+        hh = second_high > first_high
+        hl = second_low > first_low
+        
+        # Bearish: Lower highs AND lower lows (or strong downward price movement)
+        lh = second_high < first_high
+        ll = second_low < first_low
+        
+        structure_data['hh'] = hh
+        structure_data['hl'] = hl
+        structure_data['lh'] = lh
+        structure_data['ll'] = ll
         
         if hh and hl:
             return 'bullish', structure_data
-        elif ll and lh:
+        elif lh and ll:
+            return 'bearish', structure_data
+        elif price_change_pct > 0.1:  # Strong upward move
+            return 'bullish', structure_data
+        elif price_change_pct < -0.1:  # Strong downward move
             return 'bearish', structure_data
         else:
             return 'neutral', structure_data
