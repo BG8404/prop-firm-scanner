@@ -106,7 +106,7 @@ def track_signal(signal_id, signal_data, max_duration_hours=24):
                 'direction': direction,
                 'entry_price': signal_data.get('entry'),
                 'stop_price': signal_data.get('stop'),
-                'target_price': signal_data.get('takeProfit')
+                'target_price': signal_data.get('target') or signal_data.get('takeProfit')
             }
             
             outcome, price, pnl = check_signal_outcome(signal)
