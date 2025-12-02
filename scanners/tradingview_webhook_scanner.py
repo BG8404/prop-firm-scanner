@@ -72,12 +72,12 @@ client = OpenAI(api_key=OPENAI_API_KEY)
 # ========= EMAIL CONFIG =========
 # TODO: Move to environment variables for security
 ENABLE_EMAIL_ALERTS = True
-EMAIL_FROM = "wtgrello@gmail.com"
-EMAIL_TO = "williamgrello@icloud.com"
+EMAIL_FROM = os.environ.get("EMAIL_USER", "")
+EMAIL_TO = os.environ.get("EMAIL_TO", "williamgrello@icloud.com")
 SMTP_SERVER = "smtp.gmail.com"
 SMTP_PORT = 587
-EMAIL_USER = "wtgrello@gmail.com"
-EMAIL_PASS = "gzvl bttv yezg snoo"
+EMAIL_USER = os.environ.get("EMAIL_USER", "")
+EMAIL_PASS = os.environ.get("EMAIL_PASS", "")
 # ================================
 
 # ========= QUALITY FILTERS =========
