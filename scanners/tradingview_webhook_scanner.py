@@ -991,26 +991,36 @@ def clear_candles():
 
 @app.route('/api/scan/all', methods=['GET'])
 def scan_all_tickers():
-    """Scan all configured tickers using Yahoo Finance data"""
+    """Scan all tickers that have stored candle data"""
     try:
         results = []
-        tickers = scanner_settings.get('tickers', ['MNQ=F', 'MES=F', 'MGC=F'])
         
-        for ticker in tickers:
+        # Get all tickers that actually have data stored (from TradingView webhooks)
+        stored_tickers = set()
+        for tf in ["1m", "5m", "15m"]:
+            for ticker in candle_storage[tf].keys():
+                if len(candle_storage["1m"].get(ticker, [])) > 0:
+                    stored_tickers.add(ticker)
+        
+        if not stored_tickers:
+            return jsonify({"error": "No candle data stored yet", "results": []})
+        
+        for ticker in stored_tickers:
             print(f"\n🔍 Scanning {ticker}...")
             
-            # Fetch data from Yahoo Finance
-            yf_data = fetch_backup_data(ticker)
+            # Get stored candle data
+            candles_1m = list(candle_storage["1m"].get(ticker, []))
+            candles_5m = list(candle_storage["5m"].get(ticker, []))
+            candles_15m = list(candle_storage["15m"].get(ticker, []))
             
-            candles_15m = yf_data.get('15m', [])
-            candles_5m = yf_data.get('5m', [])
-            candles_1m = yf_data.get('1m', [])
+            print(f"   Data: {len(candles_1m)} x 1m, {len(candles_5m)} x 5m, {len(candles_15m)} x 15m")
             
-            if len(candles_1m) < 15 or len(candles_5m) < 10 or len(candles_15m) < 10:
+            if len(candles_1m) < 15 or len(candles_5m) < 3 or len(candles_15m) < 2:
                 results.append({
                     "ticker": ticker,
-                    "error": "Insufficient data",
-                    "direction": "no_trade"
+                    "error": f"Insufficient data: {len(candles_1m)}x1m, {len(candles_5m)}x5m, {len(candles_15m)}x15m",
+                    "direction": "no_trade",
+                    "htf_bias": "NEUTRAL"
                 })
                 continue
             
@@ -1018,9 +1028,14 @@ def scan_all_tickers():
             result = mtf_analyze(candles_15m, candles_5m, candles_1m, ticker)
             results.append(result)
             
-            # Log if signal found
-            if result.get('direction') != 'no_trade':
-                add_log(f"📊 Scan: {ticker} {result['direction'].upper()} {result['confidence']}%", "success")
+            # Log result
+            direction = result.get('direction', 'no_trade')
+            confidence = result.get('confidence', 0)
+            htf_bias = result.get('htf_bias', 'NEUTRAL')
+            print(f"   Result: {htf_bias} bias, {direction} @ {confidence}%")
+            
+            if direction != 'no_trade':
+                add_log(f"📊 Scan: {ticker} {direction.upper()} {confidence}%", "success")
         
         return jsonify({
             "timestamp": datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
