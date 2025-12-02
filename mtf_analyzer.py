@@ -254,15 +254,15 @@ class MTFAnalyzer:
             htf_bias: 'BULLISH', 'BEARISH', or 'NEUTRAL'
             details: dict with analysis details
         """
-        if not candles_15m or len(candles_15m) < 5:
+        if not candles_15m or len(candles_15m) < 2:
             return 'NEUTRAL', {'error': 'Insufficient 15m data'}
         
         # 1. Trend Direction (HH/HL or LL/LH)
-        trend, structure = self.detect_trend_structure(candles_15m, lookback=4)
+        trend, structure = self.detect_trend_structure(candles_15m, lookback=1)
         
         # 2. Key Levels
-        swing_highs = self.find_swing_highs(candles_15m, lookback=4)
-        swing_lows = self.find_swing_lows(candles_15m, lookback=4)
+        swing_highs = self.find_swing_highs(candles_15m, lookback=1)
+        swing_lows = self.find_swing_lows(candles_15m, lookback=1)
         
         key_levels = {
             'resistance': swing_highs[-1]['price'] if swing_highs else None,
@@ -308,7 +308,7 @@ class MTFAnalyzer:
             setup_valid: bool
             details: dict
         """
-        if not candles_5m or len(candles_5m) < 5:
+        if not candles_5m or len(candles_5m) < 2:
             return 0, False, {'error': 'Insufficient 5m data'}
         
         score = 0
