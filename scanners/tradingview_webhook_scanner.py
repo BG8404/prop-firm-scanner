@@ -1048,6 +1048,44 @@ def scan_all_tickers():
         return jsonify({"error": str(e)}), 500
 
 
+# ========= TEST EMAIL =========
+
+@app.route('/api/test-email', methods=['GET'])
+def test_email():
+    """Send a test email to verify email configuration"""
+    if not EMAIL_USER or not EMAIL_PASS:
+        return jsonify({"error": "Email not configured. Set EMAIL_USER and EMAIL_PASS environment variables."}), 400
+    
+    try:
+        import smtplib
+        from email.mime.text import MIMEText
+        
+        msg = MIMEText(f"""
+🎯 Prop Firm Scanner - Test Email
+
+This is a test email to verify your alert system is working!
+
+If you received this, your email alerts are configured correctly.
+
+Scanner URL: https://web-production-23cc7.up.railway.app
+Time: {dt.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
+
+You will receive alerts like this when the scanner finds valid trade signals.
+        """)
+        msg['Subject'] = "🎯 Test Alert - Prop Firm Scanner"
+        msg['From'] = EMAIL_USER
+        msg['To'] = EMAIL_TO
+        
+        with smtplib.SMTP(SMTP_SERVER, SMTP_PORT) as server:
+            server.starttls()
+            server.login(EMAIL_USER, EMAIL_PASS)
+            server.send_message(msg)
+        
+        return jsonify({"status": "success", "message": f"Test email sent to {EMAIL_TO}"})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
 # ========= AI COACH API =========
 
 @app.route('/api/coach/analyze', methods=['POST'])

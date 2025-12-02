@@ -254,7 +254,7 @@ class MTFAnalyzer:
             htf_bias: 'BULLISH', 'BEARISH', or 'NEUTRAL'
             details: dict with analysis details
         """
-        if not candles_15m or len(candles_15m) < 20:
+        if not candles_15m or len(candles_15m) < 5:
             return 'NEUTRAL', {'error': 'Insufficient 15m data'}
         
         # 1. Trend Direction (HH/HL or LL/LH)
@@ -308,7 +308,7 @@ class MTFAnalyzer:
             setup_valid: bool
             details: dict
         """
-        if not candles_5m or len(candles_5m) < 20:
+        if not candles_5m or len(candles_5m) < 5:
             return 0, False, {'error': 'Insufficient 5m data'}
         
         score = 0
