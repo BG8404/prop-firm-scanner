@@ -462,13 +462,14 @@ def validate_signal(signal, ticker):
         reasons.append(f"❌ Price drifted {drift_ticks:.1f} ticks from entry")
         return False, reasons
     
-    # Check 6: Momentum alignment
-    if REQUIRE_MOMENTUM_ALIGNMENT:
-        is_aligned, momentum_desc = check_momentum_alignment(ticker, direction)
-        if not is_aligned:
-            reasons.append(f"❌ Recent momentum conflicts: {momentum_desc}")
-            return False, reasons
-        reasons.append(f"✓ Momentum: {momentum_desc}")
+    # Check 6: Momentum alignment - DISABLED (MTF analyzer already checks direction alignment)
+    # if REQUIRE_MOMENTUM_ALIGNMENT:
+    #     is_aligned, momentum_desc = check_momentum_alignment(ticker, direction)
+    #     if not is_aligned:
+    #         reasons.append(f"❌ Recent momentum conflicts: {momentum_desc}")
+    #         return False, reasons
+    #     reasons.append(f"✓ Momentum: {momentum_desc}")
+    reasons.append("✓ MTF alignment confirmed")
     
     # All checks passed
     reasons.append(f"✓ Confidence: {confidence}%")

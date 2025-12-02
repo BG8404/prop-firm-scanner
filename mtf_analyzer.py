@@ -323,6 +323,7 @@ class MTFAnalyzer:
         result['entry'] = round(current_price, 2)
         result['stop'] = round(stop, 2)
         result['target'] = round(target, 2)
+        result['current_price'] = round(current_price, 2)
         
         # Track additional factors for AI learning
         result['tracking']['volume_spike_15m'] = details_15m.get('volume_spike', False)
