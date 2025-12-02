@@ -1,0 +1,29 @@
+# Prop Firm Scanner v2 Dependencies
+
+# Web framework for webhook endpoints and dashboard
+flask>=2.3.0
+
+# Production WSGI server
+gunicorn>=21.0.0
+
+# OpenAI API for AI-powered analysis
+openai>=1.0.0
+
+# HTTP requests library
+requests>=2.28.0
+
+# ngrok Python wrapper for tunneling (local dev only)
+pyngrok>=7.0.0
+
+# Data analysis
+pandas>=2.0.0
+
+# Yahoo Finance data fetching for outcome tracking
+yfinance>=0.2.0
+
+# SSL certificates
+certifi>=2023.0.0
+
+# Note: SQLite is built into Python (no install needed)
+# Note: Chart.js is loaded via CDN in dashboard
+

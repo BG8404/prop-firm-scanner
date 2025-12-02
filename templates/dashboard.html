@@ -1,0 +1,500 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Prop Firm Scanner | Dashboard v2</title>
+    <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <link rel="stylesheet" href="/static/dashboard.css">
+</head>
+<body>
+    <div class="bg-grid"></div>
+    <div class="bg-glow"></div>
+
+    <header>
+        <div class="logo">
+            <div class="logo-icon">🎯</div>
+            <h1>Prop Firm Scanner</h1>
+        </div>
+        <div class="header-status">
+            <div class="live-indicator">
+                <div class="live-dot"></div>
+                <span>LIVE</span>
+            </div>
+            <div class="current-time" id="currentTime">--:--:--</div>
+        </div>
+    </header>
+
+    <!-- Navigation Tabs -->
+    <nav class="nav-tabs">
+        <button class="nav-tab active" data-tab="dashboard" onclick="switchTab('dashboard')">📊 Dashboard</button>
+        <button class="nav-tab" data-tab="apex" onclick="switchTab('apex')">⚠️ Apex Rules</button>
+        <button class="nav-tab" data-tab="analytics" onclick="switchTab('analytics')">📈 Analytics</button>
+        <button class="nav-tab" data-tab="coach" onclick="switchTab('coach')">🧠 AI Coach</button>
+    </nav>
+
+    <main>
+        <!-- Dashboard Tab -->
+        <div id="tab-dashboard" class="tab-content active">
+        <!-- Status Cards -->
+        <div class="status-grid">
+            <div class="status-card">
+                <div class="status-card-header">
+                        <span class="status-card-title">Win Rate</span>
+                        <span class="status-badge ok">--</span>
+                </div>
+                    <div class="status-value green" id="winRate">--%</div>
+                    <div class="status-subtitle" id="winLossCount">0W / 0L</div>
+            </div>
+            <div class="status-card">
+                <div class="status-card-header">
+                        <span class="status-card-title">Total P&L</span>
+                        <span class="status-badge ok">Ticks</span>
+                </div>
+                    <div class="status-value" id="totalPnl">0</div>
+                    <div class="status-subtitle">Cumulative profit/loss</div>
+            </div>
+            <div class="status-card">
+                <div class="status-card-header">
+                        <span class="status-card-title">Today's P&L</span>
+                        <span class="status-badge warning">Today</span>
+                </div>
+                    <div class="status-value" id="todayPnl">0</div>
+                    <div class="status-subtitle" id="todayRecord">0W / 0L today</div>
+            </div>
+            <div class="status-card">
+                <div class="status-card-header">
+                        <span class="status-card-title">Tracking</span>
+                        <span class="status-badge ok">Active</span>
+                </div>
+                    <div class="status-value blue" id="trackingCount">0</div>
+                    <div class="status-subtitle">Pending outcomes</div>
+                </div>
+            </div>
+
+            <!-- Quick Apex Status -->
+            <div class="apex-panel" style="background: linear-gradient(135deg, rgba(0, 212, 255, 0.05), rgba(68, 136, 255, 0.05)); border-color: rgba(0, 212, 255, 0.2);">
+                <div class="apex-header">
+                    <span class="apex-title">⚡ Quick Status</span>
+                </div>
+                <div class="status-grid" style="margin-bottom: 0;">
+                    <div class="status-card" style="background: transparent; border: none; padding: 0;">
+                        <div class="status-card-title">Webhooks</div>
+                <div class="status-value green" id="webhookCount">0</div>
+                    </div>
+                    <div class="status-card" style="background: transparent; border: none; padding: 0;">
+                        <div class="status-card-title">Signals</div>
+                        <div class="status-value yellow" id="signalCount">0</div>
+                    </div>
+                    <div class="status-card" style="background: transparent; border: none; padding: 0;">
+                        <div class="status-card-title">Candles</div>
+                        <div class="status-value blue" id="candleCount">0</div>
+                    </div>
+            </div>
+        </div>
+
+            <!-- Candle History Status -->
+            <div class="settings-section" style="margin-bottom: 24px; background: linear-gradient(135deg, rgba(0, 212, 255, 0.08), rgba(68, 136, 255, 0.05)); border-color: rgba(0, 212, 255, 0.3);">
+                <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px;">
+                    <div>
+                        <span style="font-weight: 600; font-size: 1.1em;">📊 Candle History</span>
+                        <p style="margin: 4px 0 0 0; opacity: 0.7; font-size: 0.85em;" id="candleStatusText">Loading...</p>
+                    </div>
+                    <div id="candleStatusBadge" class="status-badge warning">Loading</div>
+                </div>
+                <div id="candleDetails" style="margin-top: 12px; display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px;">
+                </div>
+            </div>
+
+            <!-- Scan Controls -->
+            <div class="settings-section" style="margin-bottom: 24px; background: linear-gradient(135deg, rgba(0, 255, 136, 0.08), rgba(0, 212, 255, 0.05)); border-color: rgba(0, 255, 136, 0.3);">
+                <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px;">
+                    <div>
+                        <span style="font-weight: 600; font-size: 1.1em;">🔍 Manual Scan</span>
+                        <p style="margin: 4px 0 0 0; opacity: 0.7; font-size: 0.85em;">Run MTF analysis on current candle data</p>
+                    </div>
+                    <div style="display: flex; gap: 12px;">
+                        <button class="btn btn-primary" onclick="scanAllTickers()" id="scanAllBtn" style="background: linear-gradient(135deg, #00ff88, #00d4ff); color: #0a0f1a; font-weight: 600;">
+                            🚀 Scan All Tickers
+                        </button>
+                    </div>
+                </div>
+                <div id="scanResults" style="margin-top: 16px; display: none;">
+                    <div class="scan-results-header" style="font-weight: 600; margin-bottom: 8px;">📊 Scan Results</div>
+                    <div id="scanResultsContent"></div>
+                </div>
+            </div>
+
+            <!-- ngrok URL -->
+            <div class="settings-section" style="margin-bottom: 24px;">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+                    <span style="font-weight: 600;">📡 TradingView Webhook URL</span>
+                </div>
+                <div style="display: flex; gap: 12px;">
+                    <input type="text" class="setting-input" id="ngrokUrl" readonly value="Fetching ngrok URL..." style="flex: 1;">
+                    <button class="btn btn-primary copy-btn" onclick="copyNgrokUrl()">📋 Copy</button>
+            </div>
+        </div>
+
+        <!-- Settings Panel -->
+        <div class="settings-section">
+            <div class="settings-header" onclick="toggleSettings()">
+                    <div class="settings-title"><span>⚙️</span><span>Scanner Settings</span></div>
+                <span class="settings-toggle" id="settingsToggle">▼</span>
+            </div>
+            <div class="settings-content" id="settingsContent">
+                <div class="setting-group">
+                    <label class="setting-label">Scan Interval</label>
+                    <select class="setting-select" id="scanInterval">
+                        <option value="1">1 minute</option>
+                            <option value="2" selected>2 minutes</option>
+                        <option value="5">5 minutes</option>
+                    </select>
+                </div>
+                <div class="setting-group">
+                    <label class="setting-label">Min Confidence</label>
+                    <select class="setting-select" id="minConfidence">
+                        <option value="60">60%</option>
+                            <option value="70">70%</option>
+                            <option value="80" selected>80%</option>
+                        <option value="90">90%</option>
+                    </select>
+                </div>
+                <div class="setting-group">
+                    <label class="setting-label">Min Risk:Reward</label>
+                    <select class="setting-select" id="minRiskReward">
+                        <option value="1.5">1.5:1</option>
+                            <option value="2.0" selected>2:1</option>
+                        <option value="2.5">2.5:1</option>
+                        <option value="3.0">3:1</option>
+                    </select>
+                </div>
+                <div class="setting-group">
+                    <label class="setting-label">Tickers</label>
+                        <input type="text" class="setting-input" id="tickersInput" placeholder="Add ticker...">
+                        <div class="ticker-tags" id="tickerTags"></div>
+                    </div>
+                    <div style="grid-column: 1 / -1; display: flex; gap: 12px; margin-top: 12px;">
+                        <button class="btn btn-success" onclick="saveSettings()">💾 Save</button>
+                        <button class="btn btn-outline" onclick="resetSettings()">↺ Reset</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Trade Journal -->
+        <div class="section-header">
+            <div>
+                <h2 class="section-title">📔 Trade Journal</h2>
+                    <p class="section-subtitle">Auto-tracked signals with outcomes</p>
+            </div>
+        </div>
+            <div class="signals-container" style="margin-bottom: 24px;">
+            <table class="signals-table">
+                <thead>
+                    <tr>
+                            <th>Time</th><th>Ticker</th><th>Direction</th><th>Entry</th><th>Stop</th><th>Target</th><th>Outcome</th><th>P&L</th>
+                    </tr>
+                </thead>
+                <tbody id="tradeJournalBody">
+                        <tr><td colspan="8"><div class="empty-state"><div class="empty-state-icon">📔</div><div class="empty-state-text">No trades logged yet</div></div></td></tr>
+                </tbody>
+            </table>
+        </div>
+
+        <!-- Recent Signals -->
+        <div class="section-header">
+            <div>
+                    <h2 class="section-title">📊 Recent Signals</h2>
+                    <p class="section-subtitle">AI-analyzed opportunities</p>
+            </div>
+        </div>
+        <div class="signals-container">
+            <table class="signals-table">
+                <thead>
+                    <tr>
+                            <th>Time</th><th>Ticker</th><th>Direction</th><th>Confidence</th><th>Entry</th><th>Stop</th><th>Target</th><th>Status</th>
+                    </tr>
+                </thead>
+                <tbody id="signalsBody">
+                        <tr><td colspan="8"><div class="empty-state"><div class="empty-state-icon">📊</div><div class="empty-state-text">No signals yet</div></div></td></tr>
+                </tbody>
+            </table>
+        </div>
+
+        <!-- Live Feed -->
+        <div class="live-feed">
+            <div class="live-feed-header">
+                    <div class="live-feed-title"><div class="live-dot"></div><span>Live Activity</span></div>
+                    <button class="btn btn-outline" style="padding: 6px 12px; font-size: 0.75rem;" onclick="clearLogs()">Clear</button>
+            </div>
+            <div class="live-feed-content" id="liveFeed">
+                    <div class="log-entry info"><span class="log-time">--:--:--</span><span class="log-message">Waiting for data...</span></div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Apex Rules Tab -->
+        <div id="tab-apex" class="tab-content">
+            <div class="apex-panel">
+                <div class="apex-header">
+                    <span class="apex-title">🏆 Apex Trader Funding Rules</span>
+                    <div>
+                        <span id="apexBalance" style="font-family: 'JetBrains Mono'; font-weight: 600; margin-right: 16px;">$50,000</span>
+                        <span id="apexPnl" style="font-family: 'JetBrains Mono'; font-weight: 600;">$0</span>
+                    </div>
+                </div>
+                <div class="apex-grid">
+                    <!-- Daily Loss Limit -->
+                    <div class="apex-rule">
+                        <div class="apex-rule-header">
+                            <span class="apex-rule-title">📉 Daily Loss Limit</span>
+                            <span class="status-badge ok" id="dailyLossBadge">OK</span>
+                        </div>
+                        <div class="apex-progress-bar">
+                            <div class="apex-progress-fill ok" id="dailyLossProgress" style="width: 0%"></div>
+                        </div>
+                        <div class="apex-rule-stats">
+                            <span id="dailyLossValue">$0 / $2,500</span>
+                            <span id="dailyLossPct">0%</span>
+                        </div>
+                        <p style="font-size: 0.75rem; color: var(--text-muted); margin-top: 8px;">Warning at 80% • Block at 100%</p>
+                    </div>
+
+                    <!-- Trailing Drawdown -->
+                    <div class="apex-rule">
+                        <div class="apex-rule-header">
+                            <span class="apex-rule-title">📊 Trailing Drawdown</span>
+                            <span class="status-badge ok" id="drawdownBadge">OK</span>
+                        </div>
+                        <div class="apex-progress-bar">
+                            <div class="apex-progress-fill ok" id="drawdownProgress" style="width: 0%"></div>
+                        </div>
+                        <div class="apex-rule-stats">
+                            <span id="drawdownValue">$0 / $2,500</span>
+                            <span id="drawdownPct">0%</span>
+                        </div>
+                        <p style="font-size: 0.75rem; color: var(--text-muted); margin-top: 8px;">Tracks from high water mark</p>
+                    </div>
+
+                    <!-- Consistency Rule -->
+                    <div class="apex-rule">
+                        <div class="apex-rule-header">
+                            <span class="apex-rule-title">⚖️ Consistency Rule</span>
+                            <span class="status-badge ok" id="consistencyBadge">OK</span>
+                        </div>
+                        <div class="apex-progress-bar">
+                            <div class="apex-progress-fill ok" id="consistencyProgress" style="width: 0%"></div>
+                        </div>
+                        <div class="apex-rule-stats">
+                            <span id="consistencyValue">0% / 30%</span>
+                        </div>
+                        <p style="font-size: 0.75rem; color: var(--text-muted); margin-top: 8px;">No day > 30% of total profits</p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Apex Configuration -->
+            <div class="settings-section">
+                <div class="settings-header">
+                    <div class="settings-title"><span>⚙️</span><span>Apex Account Configuration</span></div>
+                </div>
+                <div class="settings-content">
+                    <div class="setting-group">
+                        <label class="setting-label">Account Size</label>
+                        <input type="number" class="setting-input" id="apexAccountSize" value="50000">
+                    </div>
+                    <div class="setting-group">
+                        <label class="setting-label">Daily Loss Limit</label>
+                        <input type="number" class="setting-input" id="apexDailyLoss" value="2500">
+                    </div>
+                    <div class="setting-group">
+                        <label class="setting-label">Trailing Drawdown</label>
+                        <input type="number" class="setting-input" id="apexDrawdown" value="2500">
+                    </div>
+                    <div style="grid-column: 1 / -1; display: flex; gap: 12px; margin-top: 12px;">
+                        <button class="btn btn-success" onclick="saveApexConfig()">💾 Save Config</button>
+                        <button class="btn btn-outline" onclick="resetApexState()">🔄 Reset State</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Analytics Tab -->
+        <div id="tab-analytics" class="tab-content">
+            <!-- Charts -->
+            <div class="analytics-grid">
+                <div class="chart-container">
+                    <div class="chart-header"><span class="chart-title">📈 Win Rate Over Time</span></div>
+                    <div class="chart-wrapper"><canvas id="winRateChart"></canvas></div>
+                </div>
+                <div class="chart-container">
+                    <div class="chart-header"><span class="chart-title">💰 P&L Over Time</span></div>
+                    <div class="chart-wrapper"><canvas id="pnlChart"></canvas></div>
+                </div>
+            </div>
+
+            <!-- Direction Performance -->
+            <div class="analytics-grid">
+                <div class="analytics-card">
+                    <div class="analytics-card-header"><span class="analytics-card-title">📈 Long Trades</span></div>
+                    <div class="analytics-item"><span class="analytics-item-label">Win Rate</span><span class="analytics-item-value green" id="longWinRate">--%</span></div>
+                    <div class="analytics-item"><span class="analytics-item-label">Total P&L</span><span class="analytics-item-value" id="longPnl">--</span></div>
+                </div>
+                <div class="analytics-card">
+                    <div class="analytics-card-header"><span class="analytics-card-title">📉 Short Trades</span></div>
+                    <div class="analytics-item"><span class="analytics-item-label">Win Rate</span><span class="analytics-item-value green" id="shortWinRate">--%</span></div>
+                    <div class="analytics-item"><span class="analytics-item-label">Total P&L</span><span class="analytics-item-value" id="shortPnl">--</span></div>
+                </div>
+                <div class="analytics-card">
+                    <div class="analytics-card-header"><span class="analytics-card-title">🔥 Streaks</span></div>
+                    <div class="analytics-item"><span class="analytics-item-label">Current</span><span class="analytics-item-value" id="currentStreak">--</span></div>
+                    <div class="analytics-item"><span class="analytics-item-label">Max Win</span><span class="analytics-item-value green" id="maxWinStreak">--</span></div>
+                    <div class="analytics-item"><span class="analytics-item-label">Max Loss</span><span class="analytics-item-value red" id="maxLossStreak">--</span></div>
+                </div>
+            </div>
+
+            <!-- Best/Worst Tickers -->
+            <div class="analytics-grid">
+                <div class="signals-container">
+                    <div style="padding: 14px 18px; background: var(--bg-secondary); border-bottom: 1px solid var(--border-color);">
+                        <span style="font-weight: 600;">🏆 Best Tickers</span>
+                    </div>
+                    <table class="signals-table">
+                        <thead><tr><th>Ticker</th><th>Trades</th><th>Win Rate</th><th>P&L</th></tr></thead>
+                        <tbody id="bestTickersBody"><tr><td colspan="4" class="empty-state">No data</td></tr></tbody>
+                    </table>
+                </div>
+                <div class="signals-container">
+                    <div style="padding: 14px 18px; background: var(--bg-secondary); border-bottom: 1px solid var(--border-color);">
+                        <span style="font-weight: 600;">⚠️ Worst Tickers</span>
+                    </div>
+                    <table class="signals-table">
+                        <thead><tr><th>Ticker</th><th>Trades</th><th>Win Rate</th><th>P&L</th></tr></thead>
+                        <tbody id="worstTickersBody"><tr><td colspan="4" class="empty-state">No data</td></tr></tbody>
+                    </table>
+                </div>
+            </div>
+
+            <!-- Confidence Performance -->
+            <div class="signals-container" style="margin-top: 24px;">
+                <div style="padding: 14px 18px; background: var(--bg-secondary); border-bottom: 1px solid var(--border-color);">
+                    <span style="font-weight: 600;">🎯 Performance by Confidence Level</span>
+                </div>
+                <table class="signals-table">
+                    <thead><tr><th>Confidence</th><th>Trades</th><th>Win Rate</th><th>Total P&L</th><th>Avg P&L</th></tr></thead>
+                    <tbody id="confidenceBody"><tr><td colspan="5" class="empty-state">No data</td></tr></tbody>
+                </table>
+            </div>
+        </div>
+
+        <!-- AI Tuning Tab -->
+        <!-- AI Coach Tab -->
+        <div id="tab-coach" class="tab-content">
+            <!-- Coach Header -->
+            <div class="tuning-panel">
+                <div class="apex-header">
+                    <span class="apex-title">🧠 AI Strategy Coach</span>
+                    <div style="display: flex; align-items: center; gap: 16px;">
+                        <span style="color: var(--text-secondary);">Trend:</span>
+                        <span id="coachTrend" style="font-weight: 600;">--</span>
+                        <span id="coachPendingBadge" class="status-badge warning">0 pending</span>
+                    </div>
+                </div>
+                <p style="color: var(--text-secondary); margin-bottom: 20px;">
+                    AI analyzes your trading history and suggests improvements. Review each suggestion and approve or reject.
+                </p>
+                
+                <div style="display: flex; gap: 12px; margin-bottom: 20px;">
+                    <button class="btn btn-primary" onclick="runCoachAnalysis()">🔍 Run Analysis</button>
+                    <button class="btn btn-outline" onclick="loadCoachData()">🔄 Refresh</button>
+                </div>
+                
+                <!-- Quick Insights -->
+                <div class="status-grid" style="margin-bottom: 0;">
+                    <div class="status-card" style="background: transparent; border: none; padding: 10px;">
+                        <div class="status-card-title">Total Trades</div>
+                        <div class="status-value blue" id="coachTotalTrades">--</div>
+                    </div>
+                    <div class="status-card" style="background: transparent; border: none; padding: 10px;">
+                        <div class="status-card-title">Win Rate</div>
+                        <div class="status-value green" id="coachWinRate">--%</div>
+                    </div>
+                    <div class="status-card" style="background: transparent; border: none; padding: 10px;">
+                        <div class="status-card-title">Changes This Week</div>
+                        <div class="status-value yellow" id="coachChangesWeek">0</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Pending Suggestions -->
+            <div class="section-header">
+                <div>
+                    <h2 class="section-title">📋 Pending Suggestions</h2>
+                    <p class="section-subtitle">Review and approve AI recommendations</p>
+                </div>
+            </div>
+            
+            <div id="coachSuggestions" class="suggestions-container">
+                <div class="empty-state">
+                    <div class="empty-state-icon">🔍</div>
+                    <div class="empty-state-text">Click "Run Analysis" to get suggestions</div>
+                    <div class="empty-state-subtext">AI will analyze your trades and suggest improvements</div>
+                </div>
+            </div>
+
+            <!-- Suggestion History -->
+            <div class="section-header" style="margin-top: 24px;">
+                <div>
+                    <h2 class="section-title">📜 History</h2>
+                    <p class="section-subtitle">Past suggestions and their outcomes</p>
+                </div>
+            </div>
+            
+            <div class="signals-container">
+                <table class="signals-table">
+                    <thead>
+                        <tr>
+                            <th>Date</th>
+                            <th>Suggestion</th>
+                            <th>Type</th>
+                            <th>Status</th>
+                            <th>Impact</th>
+                        </tr>
+                    </thead>
+                    <tbody id="coachHistoryBody">
+                        <tr><td colspan="5"><div class="empty-state">No history yet</div></td></tr>
+                    </tbody>
+                </table>
+            </div>
+
+            <!-- Prompt Status -->
+            <div class="settings-section" style="margin-top: 24px;">
+                <div class="settings-header" onclick="togglePromptStatus()">
+                    <div class="settings-title"><span>⚙️</span><span>AI Prompt Modifications</span></div>
+                    <span class="settings-toggle" id="promptToggle">▼</span>
+                </div>
+                <div class="settings-content hidden" id="promptContent">
+                    <div class="setting-group">
+                        <label class="setting-label">Emphasized Patterns</label>
+                        <div id="emphasizedPatterns" class="ticker-tags">None yet</div>
+                    </div>
+                    <div class="setting-group">
+                        <label class="setting-label">Caution Patterns</label>
+                        <div id="cautionPatterns" class="ticker-tags">None yet</div>
+                    </div>
+                    <div class="setting-group">
+                        <label class="setting-label">Time Filters</label>
+                        <div id="timeFilters">None configured</div>
+                    </div>
+                    <div style="grid-column: 1 / -1; margin-top: 12px;">
+                        <button class="btn btn-outline" onclick="resetPromptMods()">🔄 Reset All Modifications</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <script src="/static/dashboard.js"></script>
+</body>
+</html>

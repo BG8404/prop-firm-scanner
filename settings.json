@@ -1,0 +1,10 @@
+{
+  "scan_interval": 1,
+  "min_confidence": 70,
+  "min_risk_reward": 1.5,
+  "tickers": [
+    "MNQ=F",
+    "MES=F",
+    "MGC=F"
+  ]
+}
