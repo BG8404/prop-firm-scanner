@@ -1038,7 +1038,7 @@ def scan_all_tickers():
                 add_log(f"📊 Scan: {ticker} {direction.upper()} {confidence}%", "success")
         
         return jsonify({
-            "timestamp": datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+            "timestamp": dt.datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
             "results": results,
             "signals": [r for r in results if r.get('direction') != 'no_trade']
         })
