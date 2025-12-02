@@ -580,19 +580,23 @@ def home():
 @app.route('/api/status')
 def api_status():
     """API endpoint for dashboard data"""
-    # Fetch ngrok URL server-side (avoids CORS issues)
-    ngrok_url = None
-    try:
-        ngrok_response = http_requests.get('http://localhost:4040/api/tunnels', timeout=1)
-        tunnels = ngrok_response.json().get('tunnels', [])
-        for tunnel in tunnels:
-            if tunnel.get('proto') == 'https':
-                ngrok_url = tunnel.get('public_url')
-                break
-        if not ngrok_url and tunnels:
-            ngrok_url = tunnels[0].get('public_url')
-    except Exception:
-        ngrok_url = None
+    # Get public URL - check Railway first, then ngrok
+    public_url = os.environ.get('RAILWAY_PUBLIC_DOMAIN')
+    if public_url:
+        public_url = f"https://{public_url}"
+    else:
+        # Try ngrok for local development
+        try:
+            ngrok_response = http_requests.get('http://localhost:4040/api/tunnels', timeout=1)
+            tunnels = ngrok_response.json().get('tunnels', [])
+            for tunnel in tunnels:
+                if tunnel.get('proto') == 'https':
+                    public_url = tunnel.get('public_url')
+                    break
+            if not public_url and tunnels:
+                public_url = tunnels[0].get('public_url')
+        except Exception:
+            public_url = None
     
     return jsonify({
         "status": "running",
@@ -608,7 +612,7 @@ def api_status():
         "signal_count": dashboard_stats["signal_count"],
         "recent_signals": list(dashboard_stats["recent_signals"]),
         "recent_logs": list(dashboard_stats["recent_logs"])[:10],
-        "ngrok_url": ngrok_url
+        "ngrok_url": public_url
     })
 
 
