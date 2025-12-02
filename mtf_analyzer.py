@@ -1,497 +1,224 @@
 """
-Multi-Timeframe Rule-Based Analyzer
-Mechanical confluence system for high-probability trade signals
+Multi-Timeframe Rule-Based Analyzer v2
+SIMPLIFIED: All 3 timeframes aligned = SIGNAL
 
-15m = Higher Timeframe Bias (trend direction)
-5m  = Setup Confirmation (structure breaks, alignment)
-1m  = Entry Trigger (micro alignment, entry conditions)
+15m = Higher Timeframe Direction
+5m  = Mid Timeframe Confirmation  
+1m  = Entry Timeframe Alignment
 
-Confidence Scoring:
-- 15m bias match = +40%
-- 5m trend match = +30%
-- 5m momentum match = +20%
-- 5m structure break = +10%
+Confidence Scoring (NEW):
+- 15m direction clear = +35%
+- 5m same direction = +35%
+- 1m same direction = +20%
+- BOS detected = +10%
+
+Optional factors tracked for AI Coach learning:
+- Volume, Time of day, Candle size, etc.
 """
 
-from collections import deque
 from datetime import datetime
 import statistics
 
 
 class MTFAnalyzer:
     """
-    Multi-Timeframe Analyzer with rule-based confluence scoring
+    Simplified Multi-Timeframe Analyzer
+    Core rule: All 3 timeframes must align
     """
     
     def __init__(self):
-        self.ema_periods = {
-            '15m': 20,  # HTF trend EMA
-            '5m': 21,   # Setup EMA
-            '1m': 9     # Entry EMA
-        }
+        pass
     
     # ==================== HELPERS ====================
     
-    def calculate_ema(self, candles, period):
-        """Calculate EMA from candle closes"""
-        if len(candles) < period:
-            return None
+    def get_candle_direction(self, candle):
+        """Determine if a single candle is bullish or bearish"""
+        open_price = candle.get('open', 0)
+        close_price = candle.get('close', 0)
         
-        closes = [c.get('close', 0) for c in candles]
-        multiplier = 2 / (period + 1)
-        
-        # Start with SMA
-        ema = sum(closes[:period]) / period
-        
-        # Calculate EMA
-        for close in closes[period:]:
-            ema = (close - ema) * multiplier + ema
-        
-        return ema
+        if close_price > open_price:
+            return 'bullish'
+        elif close_price < open_price:
+            return 'bearish'
+        else:
+            return 'neutral'
     
-    def find_swing_highs(self, candles, lookback=5):
-        """Find swing high points"""
-        swing_highs = []
-        for i in range(lookback, len(candles) - lookback):
-            high = candles[i].get('high', 0)
-            is_swing = True
-            for j in range(i - lookback, i + lookback + 1):
-                if j != i and candles[j].get('high', 0) >= high:
-                    is_swing = False
-                    break
-            if is_swing:
-                swing_highs.append({'index': i, 'price': high, 'time': candles[i].get('time')})
-        return swing_highs
-    
-    def find_swing_lows(self, candles, lookback=5):
-        """Find swing low points"""
-        swing_lows = []
-        for i in range(lookback, len(candles) - lookback):
-            low = candles[i].get('low', 0)
-            is_swing = True
-            for j in range(i - lookback, i + lookback + 1):
-                if j != i and candles[j].get('low', 0) <= low:
-                    is_swing = False
-                    break
-            if is_swing:
-                swing_lows.append({'index': i, 'price': low, 'time': candles[i].get('time')})
-        return swing_lows
-    
-    def detect_trend_structure(self, candles, lookback=3):
+    def get_trend_direction(self, candles):
         """
-        Detect HH/HL (bullish) or LL/LH (bearish) structure
-        Returns: 'bullish', 'bearish', or 'neutral'
+        Determine overall trend direction from candles
+        Simple: Compare first candle open to last candle close
         """
-        if len(candles) < 2:
+        if not candles or len(candles) < 1:
             return 'neutral', {}
         
-        # Simple approach: compare first half vs second half of candles
-        mid = len(candles) // 2
-        if mid == 0:
-            mid = 1
+        first_open = candles[0].get('open', 0)
+        last_close = candles[-1].get('close', 0)
         
-        first_half = candles[:mid]
-        second_half = candles[mid:]
+        # Calculate change
+        if first_open > 0:
+            change_pct = ((last_close - first_open) / first_open) * 100
+        else:
+            change_pct = 0
         
-        # Get highs and lows from each half
-        first_high = max(c.get('high', 0) for c in first_half)
-        first_low = min(c.get('low', float('inf')) for c in first_half)
-        second_high = max(c.get('high', 0) for c in second_half)
-        second_low = min(c.get('low', float('inf')) for c in second_half)
+        # Get high/low range
+        high = max(c.get('high', 0) for c in candles)
+        low = min(c.get('low', float('inf')) for c in candles)
         
-        # Also check current price vs open
-        first_price = candles[0].get('open', 0)
-        last_price = candles[-1].get('close', 0)
-        price_change_pct = ((last_price - first_price) / first_price * 100) if first_price > 0 else 0
+        # Count bullish vs bearish candles
+        bullish_count = sum(1 for c in candles if c.get('close', 0) > c.get('open', 0))
+        bearish_count = sum(1 for c in candles if c.get('close', 0) < c.get('open', 0))
         
-        structure_data = {
-            'first_high': first_high,
-            'first_low': first_low,
-            'second_high': second_high,
-            'second_low': second_low,
-            'price_change_pct': round(price_change_pct, 2)
+        details = {
+            'first_open': first_open,
+            'last_close': last_close,
+            'change_pct': round(change_pct, 3),
+            'high': high,
+            'low': low,
+            'bullish_candles': bullish_count,
+            'bearish_candles': bearish_count,
+            'total_candles': len(candles)
         }
         
-        # Bullish: Higher highs AND higher lows (or strong upward price movement)
-        hh = second_high > first_high
-        hl = second_low > first_low
-        
-        # Bearish: Lower highs AND lower lows (or strong downward price movement)
-        lh = second_high < first_high
-        ll = second_low < first_low
-        
-        structure_data['hh'] = hh
-        structure_data['hl'] = hl
-        structure_data['lh'] = lh
-        structure_data['ll'] = ll
-        
-        if hh and hl:
-            return 'bullish', structure_data
-        elif lh and ll:
-            return 'bearish', structure_data
-        elif price_change_pct > 0.1:  # Strong upward move
-            return 'bullish', structure_data
-        elif price_change_pct < -0.1:  # Strong downward move
-            return 'bearish', structure_data
+        # Determine direction
+        if last_close > first_open and bullish_count >= bearish_count:
+            return 'bullish', details
+        elif last_close < first_open and bearish_count >= bullish_count:
+            return 'bearish', details
+        elif change_pct > 0.05:  # Slight upward bias
+            return 'bullish', details
+        elif change_pct < -0.05:  # Slight downward bias
+            return 'bearish', details
         else:
-            return 'neutral', structure_data
+            return 'neutral', details
     
-    def detect_bos(self, candles, direction, lookback=10):
+    def detect_bos(self, candles, direction):
         """
         Detect Break of Structure
-        direction: 'bullish' or 'bearish'
-        Returns: True if BOS detected, with details
+        Simple: Did price break recent high (bullish) or low (bearish)?
         """
-        if len(candles) < lookback + 5:
+        if len(candles) < 3:
             return False, {}
         
-        swing_highs = self.find_swing_highs(candles[:-3], lookback=3)  # Exclude last 3 candles
-        swing_lows = self.find_swing_lows(candles[:-3], lookback=3)
+        # Get recent range (excluding last candle)
+        recent = candles[:-1]
+        recent_high = max(c.get('high', 0) for c in recent)
+        recent_low = min(c.get('low', float('inf')) for c in recent)
         
-        current_close = candles[-1].get('close', 0)
-        current_high = candles[-1].get('high', 0)
-        current_low = candles[-1].get('low', 0)
-        
-        if direction == 'bullish' and swing_highs:
-            last_swing_high = swing_highs[-1]['price']
-            if current_close > last_swing_high or current_high > last_swing_high:
-                return True, {'type': 'bos_up', 'broken_level': last_swing_high, 'current': current_close}
-        
-        elif direction == 'bearish' and swing_lows:
-            last_swing_low = swing_lows[-1]['price']
-            if current_close < last_swing_low or current_low < last_swing_low:
-                return True, {'type': 'bos_down', 'broken_level': last_swing_low, 'current': current_close}
-        
-        return False, {}
-    
-    def check_ema_position(self, candles, period):
-        """Check if price is above or below EMA"""
-        ema = self.calculate_ema(candles, period)
-        if ema is None:
-            return 'neutral', None
-        
-        current_close = candles[-1].get('close', 0)
-        
-        if current_close > ema * 1.001:  # Small buffer
-            return 'above', ema
-        elif current_close < ema * 0.999:
-            return 'below', ema
-        else:
-            return 'at', ema
-    
-    def check_pullback_to_ema(self, candles, period, tolerance_pct=0.2):
-        """Check if price recently pulled back to EMA"""
-        ema = self.calculate_ema(candles, period)
-        if ema is None:
-            return False, {}
-        
-        # Check last 3 candles for EMA touch
-        for i in range(-3, 0):
-            candle = candles[i]
-            low = candle.get('low', 0)
-            high = candle.get('high', 0)
-            
-            tolerance = ema * (tolerance_pct / 100)
-            
-            if low <= ema + tolerance and high >= ema - tolerance:
-                return True, {'ema': ema, 'touch_candle': i}
-        
-        return False, {}
-    
-    def check_momentum(self, candles, lookback=5):
-        """
-        Check momentum direction based on recent candles
-        Returns: 'bullish', 'bearish', or 'neutral'
-        """
-        if len(candles) < lookback:
-            return 'neutral', 0
-        
-        recent = candles[-lookback:]
-        
-        bullish_candles = sum(1 for c in recent if c.get('close', 0) > c.get('open', 0))
-        bearish_candles = sum(1 for c in recent if c.get('close', 0) < c.get('open', 0))
-        
-        # Price change
-        price_change = recent[-1].get('close', 0) - recent[0].get('open', 0)
-        
-        if bullish_candles >= 3 and price_change > 0:
-            return 'bullish', bullish_candles
-        elif bearish_candles >= 3 and price_change < 0:
-            return 'bearish', bearish_candles
-        else:
-            return 'neutral', 0
-    
-    def check_micro_trend(self, candles_1m):
-        """Check 1m micro trend alignment"""
-        if len(candles_1m) < 10:
-            return 'neutral', {}
-        
-        trend, structure = self.detect_trend_structure(candles_1m, lookback=2)
-        return trend, structure
-    
-    def detect_expansion_candle(self, candles, threshold_mult=1.5):
-        """Detect if last candle is an expansion/momentum candle"""
-        if len(candles) < 10:
-            return False, {}
-        
-        # Calculate average candle size
-        recent_sizes = [abs(c.get('close', 0) - c.get('open', 0)) for c in candles[-10:-1]]
-        avg_size = statistics.mean(recent_sizes) if recent_sizes else 0
-        
-        if avg_size == 0:
-            return False, {}
-        
+        # Check if last candle broke the range
         last_candle = candles[-1]
-        last_size = abs(last_candle.get('close', 0) - last_candle.get('open', 0))
+        last_high = last_candle.get('high', 0)
+        last_low = last_candle.get('low', float('inf'))
+        last_close = last_candle.get('close', 0)
         
-        if last_size > avg_size * threshold_mult:
-            direction = 'bullish' if last_candle.get('close', 0) > last_candle.get('open', 0) else 'bearish'
-            return True, {'size': last_size, 'avg_size': avg_size, 'direction': direction}
+        if direction == 'bullish':
+            # Bullish BOS: Price closed above recent high
+            if last_close > recent_high or last_high > recent_high:
+                return True, {'type': 'bullish_bos', 'broken_level': recent_high}
+        elif direction == 'bearish':
+            # Bearish BOS: Price closed below recent low
+            if last_close < recent_low or last_low < recent_low:
+                return True, {'type': 'bearish_bos', 'broken_level': recent_low}
         
         return False, {}
     
-    def check_choppiness(self, candles, lookback=10):
-        """Detect if market is choppy (avoid trading)"""
-        if len(candles) < lookback:
+    def check_volume(self, candles):
+        """Check if current volume is above average (tracked for AI learning)"""
+        if len(candles) < 2:
             return False, 0
         
-        recent = candles[-lookback:]
+        volumes = [c.get('volume', 0) for c in candles[:-1]]
+        if not volumes or sum(volumes) == 0:
+            return False, 0
         
-        # Count direction changes
-        direction_changes = 0
-        for i in range(1, len(recent)):
-            prev_dir = 'up' if recent[i-1].get('close', 0) > recent[i-1].get('open', 0) else 'down'
-            curr_dir = 'up' if recent[i].get('close', 0) > recent[i].get('open', 0) else 'down'
-            if prev_dir != curr_dir:
-                direction_changes += 1
+        avg_volume = statistics.mean(volumes)
+        current_volume = candles[-1].get('volume', 0)
         
-        choppiness_score = direction_changes / (lookback - 1)
-        is_choppy = choppiness_score > 0.6  # More than 60% direction changes = choppy
+        volume_ratio = current_volume / avg_volume if avg_volume > 0 else 0
+        is_spike = volume_ratio > 1.5
         
-        return is_choppy, choppiness_score
+        return is_spike, round(volume_ratio, 2)
+    
+    def get_candle_size(self, candle):
+        """Get candle size relative info (tracked for AI learning)"""
+        high = candle.get('high', 0)
+        low = candle.get('low', 0)
+        open_price = candle.get('open', 0)
+        close_price = candle.get('close', 0)
+        
+        total_range = high - low
+        body_size = abs(close_price - open_price)
+        
+        return {
+            'total_range': total_range,
+            'body_size': body_size,
+            'body_pct': round((body_size / total_range * 100) if total_range > 0 else 0, 1)
+        }
+    
+    def get_time_info(self):
+        """Get time of day info (tracked for AI learning)"""
+        now = datetime.now()
+        hour = now.hour
+        
+        # Trading sessions (EST assumed)
+        if 9 <= hour < 12:
+            session = 'morning'
+        elif 12 <= hour < 14:
+            session = 'midday'
+        elif 14 <= hour < 16:
+            session = 'afternoon'
+        else:
+            session = 'extended'
+        
+        return {
+            'hour': hour,
+            'minute': now.minute,
+            'session': session,
+            'day_of_week': now.strftime('%A')
+        }
     
     # ==================== MAIN ANALYSIS ====================
     
-    def analyze_15m(self, candles_15m):
+    def analyze_timeframe(self, candles, timeframe_name):
         """
-        15-MIN TIMEFRAME — Higher-Timeframe Bias + Major Structure
-        
-        Returns:
-            htf_bias: 'BULLISH', 'BEARISH', or 'NEUTRAL'
-            details: dict with analysis details
+        Analyze a single timeframe
+        Returns direction and details
         """
-        if not candles_15m or len(candles_15m) < 2:
-            return 'NEUTRAL', {'error': 'Insufficient 15m data'}
+        if not candles or len(candles) < 1:
+            return 'neutral', {'error': f'No {timeframe_name} data'}
         
-        # 1. Trend Direction (HH/HL or LL/LH)
-        trend, structure = self.detect_trend_structure(candles_15m, lookback=1)
+        direction, details = self.get_trend_direction(candles)
         
-        # 2. Key Levels
-        swing_highs = self.find_swing_highs(candles_15m, lookback=1)
-        swing_lows = self.find_swing_lows(candles_15m, lookback=1)
-        
-        key_levels = {
-            'resistance': swing_highs[-1]['price'] if swing_highs else None,
-            'support': swing_lows[-1]['price'] if swing_lows else None
-        }
-        
-        # 3. Momentum Filter (EMA position)
-        ema_pos, ema_value = self.check_ema_position(candles_15m, self.ema_periods['15m'])
-        
-        # 4. Determine HTF Bias
-        if trend == 'bullish' and ema_pos == 'above':
-            htf_bias = 'BULLISH'
-        elif trend == 'bearish' and ema_pos == 'below':
-            htf_bias = 'BEARISH'
-        elif trend == 'bullish' or ema_pos == 'above':
-            htf_bias = 'BULLISH'  # Lean bullish
-        elif trend == 'bearish' or ema_pos == 'below':
-            htf_bias = 'BEARISH'  # Lean bearish
+        # Add BOS detection
+        if direction != 'neutral' and len(candles) >= 3:
+            bos, bos_details = self.detect_bos(candles, direction)
+            details['bos_detected'] = bos
+            details['bos_details'] = bos_details
         else:
-            htf_bias = 'NEUTRAL'
+            details['bos_detected'] = False
         
-        return htf_bias, {
-            'trend': trend,
-            'structure': structure,
-            'ema_position': ema_pos,
-            'ema_value': ema_value,
-            'key_levels': key_levels,
-            'current_price': candles_15m[-1].get('close')
-        }
-    
-    def analyze_5m(self, candles_5m, htf_bias):
-        """
-        5-MIN TIMEFRAME — Setup Confirmation
+        # Add volume info
+        vol_spike, vol_ratio = self.check_volume(candles)
+        details['volume_spike'] = vol_spike
+        details['volume_ratio'] = vol_ratio
         
-        Scoring:
-        - 15m bias match = +40%
-        - 5m trend match = +30%
-        - 5m momentum match = +20%
-        - 5m structure break = +10%
+        # Add last candle info
+        if candles:
+            details['last_candle'] = self.get_candle_size(candles[-1])
+            details['current_price'] = candles[-1].get('close', 0)
         
-        Returns:
-            score: 0-100 confidence score
-            setup_valid: bool
-            details: dict
-        """
-        if not candles_5m or len(candles_5m) < 2:
-            return 0, False, {'error': 'Insufficient 5m data'}
-        
-        score = 0
-        details = {}
-        
-        # 1. 5m Trend Direction
-        trend_5m, structure_5m = self.detect_trend_structure(candles_5m, lookback=3)
-        details['trend'] = trend_5m
-        details['structure'] = structure_5m
-        
-        # 2. Alignment with 15m Bias (+40%)
-        bias_aligned = False
-        if htf_bias == 'BULLISH' and trend_5m == 'bullish':
-            score += 40
-            bias_aligned = True
-        elif htf_bias == 'BEARISH' and trend_5m == 'bearish':
-            score += 40
-            bias_aligned = True
-        elif htf_bias == 'NEUTRAL':
-            score += 20  # Partial credit for neutral
-        
-        details['bias_aligned'] = bias_aligned
-        details['bias_score'] = 40 if bias_aligned else (20 if htf_bias == 'NEUTRAL' else 0)
-        
-        # 3. 5m Trend Match (+30%)
-        ema_pos, ema_value = self.check_ema_position(candles_5m, self.ema_periods['5m'])
-        trend_match = False
-        
-        if htf_bias == 'BULLISH' and ema_pos == 'above':
-            score += 30
-            trend_match = True
-        elif htf_bias == 'BEARISH' and ema_pos == 'below':
-            score += 30
-            trend_match = True
-        
-        details['ema_position'] = ema_pos
-        details['trend_match'] = trend_match
-        details['trend_score'] = 30 if trend_match else 0
-        
-        # 4. 5m Momentum Match (+20%)
-        momentum, momentum_strength = self.check_momentum(candles_5m, lookback=5)
-        momentum_match = False
-        
-        if htf_bias == 'BULLISH' and momentum == 'bullish':
-            score += 20
-            momentum_match = True
-        elif htf_bias == 'BEARISH' and momentum == 'bearish':
-            score += 20
-            momentum_match = True
-        
-        details['momentum'] = momentum
-        details['momentum_match'] = momentum_match
-        details['momentum_score'] = 20 if momentum_match else 0
-        
-        # 5. 5m Structure Break (+10%)
-        direction = 'bullish' if htf_bias == 'BULLISH' else 'bearish' if htf_bias == 'BEARISH' else None
-        bos_detected = False
-        
-        if direction:
-            bos_detected, bos_details = self.detect_bos(candles_5m, direction)
-            if bos_detected:
-                score += 10
-                details['bos'] = bos_details
-        
-        details['bos_detected'] = bos_detected
-        details['bos_score'] = 10 if bos_detected else 0
-        
-        # 6. Pullback Check (bonus info)
-        pullback, pullback_details = self.check_pullback_to_ema(candles_5m, self.ema_periods['5m'])
-        details['pullback_to_ema'] = pullback
-        
-        details['total_score'] = score
-        setup_valid = score >= 70
-        
-        return score, setup_valid, details
-    
-    def analyze_1m(self, candles_1m, htf_bias, setup_direction):
-        """
-        1-MIN TIMEFRAME — Entry Trigger
-        
-        Checks:
-        - Micro trend alignment
-        - Entry conditions (structure break, pullback, expansion)
-        - Drift/choppiness control
-        
-        Returns:
-            entry_valid: bool
-            entry_type: str
-            details: dict
-        """
-        if not candles_1m or len(candles_1m) < 15:
-            return False, None, {'error': 'Insufficient 1m data'}
-        
-        details = {}
-        entry_valid = False
-        entry_type = None
-        
-        # 1. Micro Trend Alignment
-        micro_trend, micro_structure = self.check_micro_trend(candles_1m)
-        details['micro_trend'] = micro_trend
-        
-        trend_aligned = False
-        if setup_direction == 'long' and micro_trend == 'bullish':
-            trend_aligned = True
-        elif setup_direction == 'short' and micro_trend == 'bearish':
-            trend_aligned = True
-        
-        details['micro_aligned'] = trend_aligned
-        
-        # 2. Check for Choppiness (avoid)
-        is_choppy, chop_score = self.check_choppiness(candles_1m, lookback=10)
-        details['is_choppy'] = is_choppy
-        details['choppiness_score'] = chop_score
-        
-        if is_choppy:
-            details['rejection_reason'] = 'Market too choppy'
-            return False, None, details
-        
-        # 3. Entry Conditions
-        
-        # A. Structure Break
-        direction = 'bullish' if setup_direction == 'long' else 'bearish'
-        micro_bos, bos_details = self.detect_bos(candles_1m, direction, lookback=5)
-        details['micro_bos'] = micro_bos
-        
-        # B. Pullback to EMA
-        pullback, pullback_details = self.check_pullback_to_ema(candles_1m, self.ema_periods['1m'])
-        details['pullback'] = pullback
-        
-        # C. Expansion Candle
-        expansion, expansion_details = self.detect_expansion_candle(candles_1m)
-        details['expansion'] = expansion
-        if expansion:
-            details['expansion_details'] = expansion_details
-        
-        # 4. Determine Entry
-        if trend_aligned:
-            if micro_bos:
-                entry_valid = True
-                entry_type = 'STRUCTURE_BREAK'
-            elif pullback:
-                entry_valid = True
-                entry_type = 'PULLBACK'
-            elif expansion and expansion_details.get('direction') == direction:
-                entry_valid = True
-                entry_type = 'MOMENTUM_EXPANSION'
-        
-        details['entry_valid'] = entry_valid
-        details['entry_type'] = entry_type
-        
-        return entry_valid, entry_type, details
+        return direction, details
     
     def full_analysis(self, candles_15m, candles_5m, candles_1m, ticker='UNKNOWN'):
         """
         Run full multi-timeframe analysis
         
-        Returns comprehensive signal with confidence scoring
+        NEW SIMPLIFIED SCORING:
+        - 15m direction clear = +35%
+        - 5m same direction = +35%  
+        - 1m same direction = +20%
+        - BOS detected (any TF) = +10%
+        
+        SIGNAL: All 3 timeframes aligned (90%+ confidence)
         """
         result = {
             'ticker': ticker,
@@ -502,62 +229,106 @@ class MTFAnalyzer:
             'setup_valid': False,
             'entry_valid': False,
             'entry_type': None,
-            'analysis': {}
+            'analysis': {},
+            'tracking': {}  # For AI Coach learning
         }
         
-        # Step 1: 15m HTF Bias
-        htf_bias, htf_details = self.analyze_15m(candles_15m)
-        result['htf_bias'] = htf_bias
-        result['analysis']['15m'] = htf_details
+        # Add time tracking for AI learning
+        result['tracking']['time'] = self.get_time_info()
         
-        if htf_bias == 'NEUTRAL':
-            result['analysis']['rejection'] = 'No clear 15m bias'
+        # ===== STEP 1: 15m Analysis (+35%) =====
+        direction_15m, details_15m = self.analyze_timeframe(candles_15m, '15m')
+        result['analysis']['15m'] = details_15m
+        result['analysis']['15m']['direction'] = direction_15m
+        
+        if direction_15m == 'neutral':
+            result['rejection'] = 'No clear 15m direction'
             return result
         
-        # Step 2: 5m Setup Confirmation
-        score_5m, setup_valid, setup_details = self.analyze_5m(candles_5m, htf_bias)
-        result['analysis']['5m'] = setup_details
-        result['setup_valid'] = setup_valid
-        result['confidence'] = score_5m
+        # 15m has direction - add 35%
+        result['confidence'] += 35
+        result['htf_bias'] = direction_15m.upper()
         
-        if not setup_valid:
-            result['analysis']['rejection'] = f'5m setup score too low ({score_5m}%)'
-            return result
+        # ===== STEP 2: 5m Analysis (+35%) =====
+        direction_5m, details_5m = self.analyze_timeframe(candles_5m, '5m')
+        result['analysis']['5m'] = details_5m
+        result['analysis']['5m']['direction'] = direction_5m
         
-        # Step 3: 1m Entry Trigger
-        setup_direction = 'long' if htf_bias == 'BULLISH' else 'short'
-        entry_valid, entry_type, entry_details = self.analyze_1m(candles_1m, htf_bias, setup_direction)
-        result['analysis']['1m'] = entry_details
-        result['entry_valid'] = entry_valid
-        result['entry_type'] = entry_type
-        
-        if not entry_valid:
-            result['analysis']['rejection'] = entry_details.get('rejection_reason', 'No valid 1m entry trigger')
-            return result
-        
-        # All conditions met!
-        result['direction'] = setup_direction
-        result['confidence'] = score_5m
-        
-        # Generate entry/stop/target
-        current_price = candles_1m[-1].get('close', 0)
-        result['current_price'] = current_price
-        
-        # Calculate levels based on structure
-        if setup_direction == 'long':
-            swing_lows = self.find_swing_lows(candles_1m, lookback=3)
-            stop = swing_lows[-1]['price'] if swing_lows else current_price * 0.998
-            risk = current_price - stop
-            target = current_price + (risk * 2)  # 2:1 R:R
+        # Check if 5m aligns with 15m
+        if direction_5m == direction_15m:
+            result['confidence'] += 35
+            result['analysis']['5m']['aligned'] = True
         else:
-            swing_highs = self.find_swing_highs(candles_1m, lookback=3)
-            stop = swing_highs[-1]['price'] if swing_highs else current_price * 1.002
-            risk = stop - current_price
-            target = current_price - (risk * 2)  # 2:1 R:R
+            result['analysis']['5m']['aligned'] = False
+            result['rejection'] = f'5m ({direction_5m}) not aligned with 15m ({direction_15m})'
+            return result
+        
+        # ===== STEP 3: 1m Analysis (+20%) =====
+        direction_1m, details_1m = self.analyze_timeframe(candles_1m, '1m')
+        result['analysis']['1m'] = details_1m
+        result['analysis']['1m']['direction'] = direction_1m
+        
+        # Check if 1m aligns
+        if direction_1m == direction_15m:
+            result['confidence'] += 20
+            result['analysis']['1m']['aligned'] = True
+        else:
+            result['analysis']['1m']['aligned'] = False
+            result['rejection'] = f'1m ({direction_1m}) not aligned with 15m/5m ({direction_15m})'
+            return result
+        
+        # ===== STEP 4: BOS Bonus (+10%) =====
+        bos_found = False
+        for tf in ['15m', '5m', '1m']:
+            if result['analysis'].get(tf, {}).get('bos_detected', False):
+                bos_found = True
+                result['analysis']['bos_timeframe'] = tf
+                break
+        
+        if bos_found:
+            result['confidence'] += 10
+        
+        result['tracking']['bos_detected'] = bos_found
+        
+        # ===== ALL ALIGNED - GENERATE SIGNAL =====
+        result['setup_valid'] = True
+        result['entry_valid'] = True
+        result['direction'] = 'long' if direction_15m == 'bullish' else 'short'
+        result['entry_type'] = 'MTF_ALIGNMENT'
+        
+        # Calculate entry, stop, target
+        current_price = candles_1m[-1].get('close', 0) if candles_1m else 0
+        
+        # Get recent swing points for stop
+        if candles_1m and len(candles_1m) >= 3:
+            if result['direction'] == 'long':
+                recent_low = min(c.get('low', float('inf')) for c in candles_1m[-5:])
+                stop = recent_low
+                risk = current_price - stop
+                target = current_price + (risk * 2)  # 2:1 R:R
+            else:
+                recent_high = max(c.get('high', 0) for c in candles_1m[-5:])
+                stop = recent_high
+                risk = stop - current_price
+                target = current_price - (risk * 2)  # 2:1 R:R
+        else:
+            # Default stops
+            if result['direction'] == 'long':
+                stop = current_price * 0.998
+                target = current_price * 1.004
+            else:
+                stop = current_price * 1.002
+                target = current_price * 0.996
         
         result['entry'] = round(current_price, 2)
         result['stop'] = round(stop, 2)
         result['target'] = round(target, 2)
+        
+        # Track additional factors for AI learning
+        result['tracking']['volume_spike_15m'] = details_15m.get('volume_spike', False)
+        result['tracking']['volume_spike_5m'] = details_5m.get('volume_spike', False)
+        result['tracking']['volume_spike_1m'] = details_1m.get('volume_spike', False)
+        result['tracking']['candle_body_pct'] = details_1m.get('last_candle', {}).get('body_pct', 0)
         
         # Build rationale
         result['rationale'] = self._build_rationale(result)
@@ -568,31 +339,29 @@ class MTFAnalyzer:
         """Build human-readable rationale"""
         direction = result['direction'].upper()
         confidence = result['confidence']
-        htf_bias = result['htf_bias']
-        entry_type = result['entry_type']
         
-        details_15m = result['analysis'].get('15m', {})
-        details_5m = result['analysis'].get('5m', {})
-        details_1m = result['analysis'].get('1m', {})
+        a15 = result['analysis'].get('15m', {})
+        a5 = result['analysis'].get('5m', {})
+        a1 = result['analysis'].get('1m', {})
         
         rationale = f"""
-{direction} Signal ({confidence}% confidence)
+{direction} SIGNAL ({confidence}% confidence)
 
-15m Analysis:
-- HTF Bias: {htf_bias}
-- Trend: {details_15m.get('trend', 'unknown')}
-- EMA Position: {details_15m.get('ema_position', 'unknown')}
+✅ 15m: {a15.get('direction', 'unknown').upper()} (+35%)
+   Change: {a15.get('change_pct', 0)}%
+   Candles: {a15.get('bullish_candles', 0)} bullish / {a15.get('bearish_candles', 0)} bearish
 
-5m Analysis:
-- Bias Aligned: {'Yes' if details_5m.get('bias_aligned') else 'No'} (+{details_5m.get('bias_score', 0)}%)
-- Trend Match: {'Yes' if details_5m.get('trend_match') else 'No'} (+{details_5m.get('trend_score', 0)}%)
-- Momentum Match: {'Yes' if details_5m.get('momentum_match') else 'No'} (+{details_5m.get('momentum_score', 0)}%)
-- BOS Detected: {'Yes' if details_5m.get('bos_detected') else 'No'} (+{details_5m.get('bos_score', 0)}%)
+✅ 5m: {a5.get('direction', 'unknown').upper()} - ALIGNED (+35%)
+   Change: {a5.get('change_pct', 0)}%
 
-1m Entry:
-- Type: {entry_type}
-- Micro Trend: {details_1m.get('micro_trend', 'unknown')}
-- Choppy: {'Yes' if details_1m.get('is_choppy') else 'No'}
+✅ 1m: {a1.get('direction', 'unknown').upper()} - ALIGNED (+20%)
+   Change: {a1.get('change_pct', 0)}%
+
+{'✅ BOS Detected (+10%)' if result.get('tracking', {}).get('bos_detected') else '❌ No BOS'}
+
+Entry: {result.get('entry')}
+Stop: {result.get('stop')}
+Target: {result.get('target')}
 """
         return rationale.strip()
 
@@ -606,5 +375,4 @@ def analyze_ticker(candles_15m, candles_5m, candles_1m, ticker='UNKNOWN'):
     return mtf_analyzer.full_analysis(candles_15m, candles_5m, candles_1m, ticker)
 
 
-print("✅ Multi-Timeframe Analyzer loaded")
-
+print("✅ MTF Analyzer v2 loaded (Simplified: All 3 TFs aligned = signal)")
