@@ -1878,7 +1878,9 @@ def webhook():
         
         # Only analyze on 1m candle closes
         if timeframe == "1m":
-            base_ticker = ticker.split(":")[0] if ":" in ticker else ticker
+            # Normalize ticker for consistent key lookup (MESZ2025 -> MES)
+            raw_ticker = ticker.split(":")[0] if ":" in ticker else ticker
+            base_ticker = normalize_ticker(raw_ticker)
             
             # Get TradingView webhook data
             candles_1m = list(candle_storage["1m"].get(base_ticker, []))
