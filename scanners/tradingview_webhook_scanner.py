@@ -35,7 +35,7 @@ from database import (
     save_candle as db_save_candle, save_candles_batch, load_candles,
     load_all_candles, get_candle_counts, clear_old_candles
 )
-from outcome_tracker import start_tracking, resume_pending_tracking, get_tracking_status, set_candle_storage, check_all_pending_outcomes, start_outcome_checker
+from outcome_tracker import set_candle_storage, check_all_pending_outcomes
 from apex_rules import (
     get_apex_status, update_apex_config, reset_apex_state,
     record_trade_result, should_block_trading, check_all_rules
@@ -1988,65 +1988,55 @@ def webhook():
                 for reason in reasons:
                     print(f"   {reason}")
                 
+                # SIMPLIFIED: Send Discord for ALL 70%+ signals
+                if confidence >= 70:
+                    status = "✅ VALID" if is_valid else "⚠️ REJECTED"
+                    print(f"\n{status}: {ticker} {direction.upper()} {confidence}%")
+                    
+                    # Always send Discord for 70%+ signals
+                    discord_signal = {
+                        'direction': direction.upper() if is_valid else 'REJECTED',
+                        'confidence': confidence,
+                        'entry': signal.get('entry') or signal.get('currentPrice') or 0,
+                        'stop': signal.get('stop') or 0,
+                        'takeProfit': signal.get('takeProfit') or 0,
+                        'rationale': signal.get('rationale', '') if is_valid else f"❌ {', '.join(reasons)}"
+                    }
+                    
+                    try:
+                        label = ticker if is_valid else f"{ticker} (REJECTED)"
+                        send_discord_alert(label, discord_signal, mtf_result)
+                    except Exception as e:
+                        print(f"⚠️ Discord failed: {e}")
+                
+                # Save valid signals to Trade Journal
                 if is_valid:
-                    # Check Apex rules before allowing trade
+                    # Check Apex rules
                     blocked, block_reason = should_block_trading()
                     if blocked:
-                        print(f"\n🚫 TRADE BLOCKED BY APEX RULES: {block_reason}")
+                        print(f"🚫 BLOCKED BY APEX: {block_reason}")
                         add_log(f"🚫 BLOCKED: {ticker} - {block_reason}", "error")
-                        signal_entry["valid"] = False
-                        is_valid = False
                     else:
-                        print(f"\n✅ SIGNAL PASSED - SENDING ALERT")
                         dashboard_stats["signal_count"] += 1
-                        add_log(f"✅ VALID SIGNAL: {ticker} {direction.upper()} {confidence}%", "success")
-                    
-                    # Save to database and start tracking
-                    signal_to_save = {
-                        'ticker': ticker,
-                        'direction': direction,
-                        'confidence': confidence,
-                        'entry': signal.get('entry'),
-                        'stop': signal.get('stop'),
-                        'takeProfit': signal.get('takeProfit'),
-                        'currentPrice': signal.get('currentPrice'),
-                        'entryType': signal.get('entryType'),
-                        'rationale': signal.get('rationale'),
-                        'is_valid': True
-                    }
-                    signal_id = save_signal(signal_to_save)
-                    start_tracking(signal_id, signal_to_save)
-                    print(f"📍 Signal #{signal_id} saved and tracking started")
-                    
-                    send_email_alert(ticker, signal, reasons)
-                    
-                    # Only Discord alert for high-confidence signals
-                    if confidence >= MIN_DISCORD_CONFIDENCE:
-                        send_discord_alert(ticker, signal, mtf_result)
-                    else:
-                        print(f"   📱 Discord skipped (conf {confidence}% < {MIN_DISCORD_CONFIDENCE}%)")
-                else:
-                    print(f"\n⛔ SIGNAL REJECTED")
-                    print(f"   Rejection reasons: {reasons}")
-                    add_log(f"⛔ Rejected: {ticker} {direction.upper()} {confidence}%", "warning")
-                    
-                    # Send Discord notification for high-confidence rejections so user knows
-                    if confidence >= 70:
-                        rejection_signal = {
-                            'direction': 'REJECTED',
+                        add_log(f"✅ VALID: {ticker} {direction.upper()} {confidence}%", "success")
+                        
+                        signal_to_save = {
+                            'ticker': ticker,
+                            'direction': direction,
                             'confidence': confidence,
-                            'entry': signal.get('entry') or signal.get('currentPrice'),
-                            'stop': signal.get('stop') or 0,
-                            'takeProfit': signal.get('takeProfit') or 0,
-                            'rationale': f"❌ REJECTED: {', '.join(reasons)}"
+                            'entry': signal.get('entry'),
+                            'stop': signal.get('stop'),
+                            'takeProfit': signal.get('takeProfit'),
+                            'currentPrice': signal.get('currentPrice'),
+                            'entryType': signal.get('entryType'),
+                            'rationale': signal.get('rationale'),
+                            'is_valid': True
                         }
-                        try:
-                            print(f"   📱 Sending rejection Discord for {ticker}...")
-                            send_discord_alert(f"{ticker} (REJECTED)", rejection_signal, mtf_result)
-                            print(f"   ✅ Rejection Discord sent!")
-                        except Exception as e:
-                            print(f"   ❌ Rejection Discord failed: {e}")
-                    # Rejected signals NOT saved to Trade Journal - only shown in Recent Signals
+                        signal_id = save_signal(signal_to_save)
+                        print(f"📍 Signal #{signal_id} saved to Trade Journal")
+                        send_email_alert(ticker, signal, reasons)
+                else:
+                    add_log(f"⛔ Rejected: {ticker} {direction.upper()} {confidence}%", "warning")
             else:
                 print(f"   No trade recommended")
                 add_log(f"📊 {ticker}: No trade ({confidence}%)", "info")
@@ -2166,8 +2156,7 @@ if __name__ == '__main__':
     except Exception as e:
         print(f"⚠️  Could not load recent signals: {e}")
     
-    print("⏰ Starting reliable outcome checker (every 30s)...")
-    start_outcome_checker(interval_seconds=30)  # More reliable than individual threads
+    print("📊 Outcome tracking: MANUAL ONLY (use Check Outcomes button)")
     
     # Use PORT env var for cloud deployment, default to 5055 for local
     port = int(os.environ.get("PORT", 5055))

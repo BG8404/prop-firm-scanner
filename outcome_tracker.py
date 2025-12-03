@@ -71,16 +71,8 @@ def get_current_price(ticker):
     except Exception:
         pass
     
-    # Try 3: yfinance fallback (may fail due to SSL issues)
-    try:
-        import yfinance as yf
-        yf_ticker = f"{base_ticker}=F"
-        data = yf.download(yf_ticker, period='1d', interval='1m', progress=False)
-        if not data.empty:
-            return float(data['Close'].iloc[-1])
-    except Exception as e:
-        pass
-    
+    # yfinance fallback disabled - causes SSL issues and crashes
+    # Price must come from webhook candles or database
     return None
 
 
@@ -277,19 +269,37 @@ def check_all_pending_outcomes():
     return updated
 
 
-def start_outcome_checker(interval_seconds=30):
+def start_outcome_checker(interval_seconds=60):
     """
     Start a reliable periodic outcome checker.
     Runs every interval_seconds to check all pending trades.
     """
     def checker_loop():
+        # Wait a bit before starting to let app fully initialize
+        time.sleep(10)
+        
         while tracking_active:
             try:
                 pending = get_pending_signals()
                 if pending:
-                    updated = check_all_pending_outcomes()
-                    if updated:
-                        print(f"📊 Outcome checker: {len(updated)} trades resolved")
+                    # Limit checks to avoid overwhelming the system
+                    max_checks = min(len(pending), 10)  # Max 10 at a time
+                    print(f"⏰ Checking {max_checks} of {len(pending)} pending trades...")
+                    
+                    checked = 0
+                    for signal in pending[:max_checks]:
+                        try:
+                            outcome, price, pnl = check_signal_outcome(signal)
+                            if outcome:
+                                emoji = '✅' if outcome == 'WIN' else '❌'
+                                print(f"{emoji} Signal #{signal['id']} {outcome}")
+                                update_signal_outcome(signal['id'], outcome, price, pnl)
+                                checked += 1
+                        except Exception as e:
+                            pass  # Silently skip errors
+                    
+                    if checked > 0:
+                        print(f"📊 Outcome checker: {checked} trades resolved")
             except Exception as e:
                 print(f"⚠️  Outcome checker error: {e}")
             
@@ -297,5 +307,5 @@ def start_outcome_checker(interval_seconds=30):
     
     thread = threading.Thread(target=checker_loop, daemon=True)
     thread.start()
-    print(f"⏰ Outcome checker started (every {interval_seconds}s)")
+    print(f"⏰ Outcome checker started (every {interval_seconds}s, max 10 trades/cycle)")
 
