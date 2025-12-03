@@ -162,13 +162,24 @@ def send_discord_alert(ticker, signal, analysis_details=None):
         if rationale:
             embed["description"] = rationale[:500]  # Limit length
         
-        # Add entry instructions if available
+        # Add position sizing if available
         if analysis_details:
+            position = analysis_details.get('position_size', {})
+            if position:
+                contracts = position.get('contracts', 1)
+                actual_risk = position.get('actual_risk', 500)
+                potential_profit = position.get('potential_profit', 1000)
+                embed["fields"].append({
+                    "name": "📊 Position Size ($500 Risk)",
+                    "value": f"**{contracts} contracts**\nRisk: ${actual_risk:.0f} → Profit: ${potential_profit:.0f}",
+                    "inline": False
+                })
+            
             entry_instruction = analysis_details.get('entry_instruction', '')
             if entry_instruction:
                 embed["fields"].append({
                     "name": "📝 Entry Instructions",
-                    "value": entry_instruction[:500],
+                    "value": entry_instruction[:400],
                     "inline": False
                 })
         
@@ -1047,8 +1058,23 @@ def analyze_mobile(ticker_symbol=None):
                     </div>
                 </div>
                 '''
-                if rr:
-                    html += f'<div style="text-align:center;margin-top:8px;color:#888;">R:R {rr}:1</div>'
+                html += f'<div style="text-align:center;margin-top:8px;color:#888;">R:R 2:1 (Fixed)</div>'
+                
+                # Position sizing box
+                position = r.get('position_size', {})
+                if position:
+                    contracts = position.get('contracts', 1)
+                    actual_risk = position.get('actual_risk', 500)
+                    potential_profit = position.get('potential_profit', 1000)
+                    html += f'''
+                    <div style="background:#1a2a3a;border:1px solid #2a4a6a;padding:12px;border-radius:8px;margin-top:12px;text-align:center;">
+                        <div style="font-size:1.5rem;font-weight:bold;color:#00d4ff;">{contracts} contracts</div>
+                        <div style="font-size:0.85rem;color:#888;margin-top:4px;">
+                            Risk: <span style="color:#ff4466">${actual_risk:.0f}</span> → 
+                            Profit: <span style="color:#00ff88">${potential_profit:.0f}</span>
+                        </div>
+                    </div>
+                    '''
             
             if stay_reason:
                 html += f'<div class="warning">🚫 {stay_reason}</div>'
@@ -1105,7 +1131,7 @@ def run_analysis(ticker_symbol=None, send_alerts=False):
                 continue
             
             # Run MTF analysis
-            mtf_result = mtf_analyze(candles_15m, candles_5m, candles_1m)
+            mtf_result = mtf_analyze(candles_15m, candles_5m, candles_1m, ticker=ticker)
             
             direction = mtf_result.get('direction', 'STAY_AWAY')
             confidence = mtf_result.get('confidence', 0)
@@ -1120,7 +1146,8 @@ def run_analysis(ticker_symbol=None, send_alerts=False):
                 "risk_reward": mtf_result.get('risk_reward'),
                 "warnings": mtf_result.get('warnings', []),
                 "stay_away_reason": mtf_result.get('stay_away_reason'),
-                "entry_instruction": mtf_result.get('entry_instruction', '')
+                "entry_instruction": mtf_result.get('entry_instruction', ''),
+                "position_size": mtf_result.get('position_size', {})
             }
             results.append(result)
             
@@ -1616,7 +1643,7 @@ def manual_scan(ticker):
             }), 400
         
         # Run MTF analysis
-        result = mtf_analyze(candles_15m, candles_5m, candles_1m, ticker)
+        result = mtf_analyze(candles_15m, candles_5m, candles_1m, ticker=ticker)
         
         # Log the result
         direction = result.get('direction', 'no_trade')
@@ -2041,7 +2068,7 @@ def webhook():
             print(f"   Data: {len(candles_15m)} x 15m, {len(candles_5m)} x 5m, {len(candles_1m)} x 1m")
             
             # Run rule-based MTF analysis
-            mtf_result = mtf_analyze(candles_15m, candles_5m, candles_1m, ticker)
+            mtf_result = mtf_analyze(candles_15m, candles_5m, candles_1m, ticker=ticker)
             
             direction = mtf_result.get('direction', 'no_trade')
             confidence = mtf_result.get('confidence', 0)

@@ -9,12 +9,10 @@ CONFIDENCE SCORING:
 4. Risk/Reward Quality    - 10% (Min 1.5:1 required)
 5. Catalysts & Volatility - 10% (News/time awareness)
 
-STAY AWAY TRIGGERS:
-- 0/3 timeframe alignment
-- Sloppy/chaotic structure
-- Non-confirming volume
-- Invalid R:R (<1.5:1)
-- Catalyst danger zone
+POSITION SIZING:
+- Fixed $500 risk per trade
+- Exact 2:1 R:R (target = 2× stop distance)
+- Calculate contracts based on tick value
 
 15m = Bias Engine (backbone - if unclear, STAY AWAY)
 5m  = Setup Quality Filter
@@ -23,6 +21,63 @@ STAY AWAY TRIGGERS:
 
 from datetime import datetime
 import statistics
+
+# Position sizing configuration
+RISK_PER_TRADE = 500  # $500 risk per trade
+TARGET_RR = 2.0       # Exact 2:1 risk/reward
+
+# Tick values per contract (how much $1 move = in dollars)
+TICK_VALUES = {
+    'MNQ': {'tick_size': 0.25, 'tick_value': 0.50},   # Micro Nasdaq: $0.50 per tick
+    'MES': {'tick_size': 0.25, 'tick_value': 1.25},   # Micro S&P: $1.25 per tick  
+    'MGC': {'tick_size': 0.10, 'tick_value': 1.00},   # Micro Gold: $1.00 per tick
+    'NQ':  {'tick_size': 0.25, 'tick_value': 5.00},   # E-mini Nasdaq
+    'ES':  {'tick_size': 0.25, 'tick_value': 12.50},  # E-mini S&P
+    'GC':  {'tick_size': 0.10, 'tick_value': 10.00},  # Gold futures
+}
+
+def calculate_position_size(ticker, entry, stop):
+    """
+    Calculate position size for $500 risk
+    Returns: contracts, risk_per_contract, potential_profit
+    """
+    # Get tick info for ticker
+    base_ticker = ticker.replace('=F', '').upper()
+    # Strip contract month (MNQZ2025 -> MNQ)
+    import re
+    base_ticker = re.sub(r'[FGHJKMNQUVXZ]\d{4}$', '', base_ticker)
+    
+    tick_info = TICK_VALUES.get(base_ticker, TICK_VALUES.get('MNQ'))  # Default to MNQ
+    tick_size = tick_info['tick_size']
+    tick_value = tick_info['tick_value']
+    
+    # Calculate stop distance in ticks
+    stop_distance = abs(entry - stop)
+    ticks_to_stop = stop_distance / tick_size
+    
+    # Risk per contract
+    risk_per_contract = ticks_to_stop * tick_value
+    
+    # Contracts needed for $500 risk
+    if risk_per_contract > 0:
+        contracts = int(RISK_PER_TRADE / risk_per_contract)
+        contracts = max(1, contracts)  # Minimum 1 contract
+    else:
+        contracts = 1
+    
+    # Actual risk with this position
+    actual_risk = contracts * risk_per_contract
+    
+    # Potential profit at 2:1
+    potential_profit = actual_risk * TARGET_RR
+    
+    return {
+        'contracts': contracts,
+        'risk_per_contract': round(risk_per_contract, 2),
+        'actual_risk': round(actual_risk, 2),
+        'potential_profit': round(potential_profit, 2),
+        'ticks_to_stop': round(ticks_to_stop, 1)
+    }
 
 
 class MTFAnalyzer:
@@ -338,7 +393,7 @@ class MTFAnalyzer:
     
     # ==================== MAIN ANALYSIS ====================
     
-    def full_analysis(self, candles_15m, candles_5m, candles_1m, entry=None, stop=None, target=None):
+    def full_analysis(self, candles_15m, candles_5m, candles_1m, entry=None, stop=None, target=None, ticker='MNQ'):
         """
         Full QuantCrawler analysis across all timeframes
         Returns comprehensive analysis with confidence score
@@ -503,22 +558,30 @@ class MTFAnalyzer:
             result['current_price'] = current_price
             result['entry'] = current_price
             
-            # ATR-based stop/target (or use provided values)
+            # ATR-based stop, then calculate target for exact 2:1 R:R
             atr = self._calculate_atr(candles_5m)
             if atr < 1:
                 atr = 5  # Minimum ATR fallback
             
-            if bias == 'LONG':
-                result['stop'] = stop if stop else round(current_price - (atr * 1.5), 2)
-                result['target'] = target if target else round(current_price + (atr * 3), 2)
-            else:  # SHORT
-                result['stop'] = stop if stop else round(current_price + (atr * 1.5), 2)
-                result['target'] = target if target else round(current_price - (atr * 3), 2)
+            # Calculate stop based on ATR
+            stop_distance = atr * 1.5
             
-            # Calculate actual R:R
-            risk = abs(result['entry'] - result['stop'])
-            reward = abs(result['target'] - result['entry'])
-            result['risk_reward'] = round(reward / risk, 2) if risk > 0 else 0
+            if bias == 'LONG':
+                result['stop'] = stop if stop else round(current_price - stop_distance, 2)
+                # Target = Entry + (2 × stop distance) for exact 2:1 R:R
+                actual_stop_dist = abs(current_price - result['stop'])
+                result['target'] = round(current_price + (actual_stop_dist * TARGET_RR), 2)
+            else:  # SHORT
+                result['stop'] = stop if stop else round(current_price + stop_distance, 2)
+                actual_stop_dist = abs(result['stop'] - current_price)
+                result['target'] = round(current_price - (actual_stop_dist * TARGET_RR), 2)
+            
+            # R:R is now exactly 2:1
+            result['risk_reward'] = TARGET_RR
+            
+            # ========== POSITION SIZING ($500 risk) ==========
+            position = calculate_position_size(ticker, result['entry'], result['stop'])
+            result['position_size'] = position
             
             # ========== ENTRY INSTRUCTIONS ==========
             # Based on strength, alignment, and momentum
@@ -615,12 +678,12 @@ class MTFAnalyzer:
 
 # ==================== CONVENIENCE FUNCTION ====================
 
-def analyze_ticker(candles_15m, candles_5m, candles_1m, entry=None, stop=None, target=None):
+def analyze_ticker(candles_15m, candles_5m, candles_1m, entry=None, stop=None, target=None, ticker='MNQ'):
     """
     Convenience function for analyzing a ticker
     """
     analyzer = MTFAnalyzer()
-    result = analyzer.full_analysis(candles_15m, candles_5m, candles_1m, entry, stop, target)
+    result = analyzer.full_analysis(candles_15m, candles_5m, candles_1m, entry, stop, target, ticker)
     result['rationale'] = analyzer._build_rationale(result)
     return result
 
