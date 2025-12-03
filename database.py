@@ -10,7 +10,11 @@ from datetime import datetime
 from threading import Lock
 
 # Database file path
-DB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'trade_journal.db')
+# Use /app/data for Railway persistent volume, fallback to local for development
+if os.path.exists('/app/data'):
+    DB_PATH = '/app/data/trade_journal.db'
+else:
+    DB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'trade_journal.db')
 
 # Thread-safe lock for database operations
 db_lock = Lock()
