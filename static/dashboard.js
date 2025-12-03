@@ -8,6 +8,8 @@ let currentTickers = ['MNQ=F', 'MES=F', 'MGC=F'];
 let loadedTradeIds = new Set();
 let winRateChart = null;
 let pnlChart = null;
+let apexPnlChart = null;
+let apexEquityChart = null;
 
 // Tab management
 function switchTab(tabName) {
@@ -34,6 +36,7 @@ function toggleSettings() {
     content.classList.toggle('hidden');
     toggle.classList.toggle('collapsed');
 }
+
 
 function addTicker(event) {
     if (event.key === 'Enter') {
@@ -448,6 +451,23 @@ async function loadApexStatus() {
         document.getElementById('apexPnl').textContent = (account.total_pnl >= 0 ? '+$' : '-$') + Math.abs(account.total_pnl || 0).toFixed(2);
         document.getElementById('apexPnl').className = account.total_pnl >= 0 ? 'green' : 'red';
         
+        // Update Total P&L label
+        const totalPnlLabel = document.getElementById('apexTotalPnlLabel');
+        if (totalPnlLabel) {
+            totalPnlLabel.textContent = (account.total_pnl >= 0 ? '+$' : '-$') + Math.abs(account.total_pnl || 0).toFixed(2);
+            totalPnlLabel.style.color = account.total_pnl >= 0 ? 'var(--accent-green)' : 'var(--accent-red)';
+        }
+        
+        // Render Apex charts and tables
+        if (data.daily_history) {
+            renderApexPnlChart(data.daily_history);
+            renderApexEquityChart(data);
+            renderApexDailyTable(data);
+        }
+        
+        // Update quick status on main dashboard
+        updateApexQuickStatus(data);
+        
     } catch (error) {
         console.error('Failed to load Apex status:', error);
     }
@@ -487,6 +507,279 @@ async function resetApexState() {
         }
     } catch (error) {
         addLog('Failed to reset Apex state', 'error');
+    }
+}
+
+// Render Apex P&L History Chart
+function renderApexPnlChart(dailyHistory) {
+    const ctx = document.getElementById('apexPnlChart');
+    if (!ctx) return;
+    
+    if (apexPnlChart) apexPnlChart.destroy();
+    
+    // Sort dates and prepare data
+    const dates = Object.keys(dailyHistory).sort();
+    const values = dates.map(d => dailyHistory[d]);
+    
+    if (dates.length === 0) {
+        return;
+    }
+    
+    apexPnlChart = new Chart(ctx, {
+        type: 'bar',
+        data: {
+            labels: dates.map(d => d.slice(5)), // Show MM-DD
+            datasets: [{
+                label: 'Daily P&L ($)',
+                data: values,
+                backgroundColor: values.map(v => v >= 0 ? 'rgba(0, 255, 136, 0.7)' : 'rgba(255, 68, 102, 0.7)'),
+                borderRadius: 6
+            }]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+                legend: { display: false }
+            },
+            scales: {
+                y: { 
+                    grid: { color: 'rgba(255,255,255,0.05)' }, 
+                    ticks: { 
+                        color: '#888',
+                        callback: (v) => '$' + v
+                    } 
+                },
+                x: { 
+                    grid: { color: 'rgba(255,255,255,0.05)' }, 
+                    ticks: { color: '#888' } 
+                }
+            }
+        }
+    });
+}
+
+// Render Apex Equity Chart
+function renderApexEquityChart(data) {
+    const ctx = document.getElementById('apexEquityChart');
+    if (!ctx) return;
+    
+    if (apexEquityChart) apexEquityChart.destroy();
+    
+    const dailyHistory = data.daily_history || {};
+    const dates = Object.keys(dailyHistory).sort();
+    
+    if (dates.length === 0) return;
+    
+    const initialBalance = data.account?.initial_balance || 50000;
+    const maxDrawdown = data.config?.max_trailing_drawdown || 2500;
+    
+    // Calculate cumulative balance and high water mark
+    let balance = initialBalance;
+    let hwm = initialBalance;
+    const balances = [];
+    const floors = [];
+    const hwms = [];
+    
+    for (const date of dates) {
+        balance += dailyHistory[date];
+        if (balance > hwm) hwm = balance;
+        balances.push(balance);
+        hwms.push(hwm);
+        floors.push(hwm - maxDrawdown);
+    }
+    
+    apexEquityChart = new Chart(ctx, {
+        type: 'line',
+        data: {
+            labels: dates.map(d => d.slice(5)),
+            datasets: [
+                {
+                    label: 'Balance',
+                    data: balances,
+                    borderColor: '#00ff88',
+                    backgroundColor: 'rgba(0, 255, 136, 0.1)',
+                    fill: true,
+                    tension: 0.3,
+                    borderWidth: 2
+                },
+                {
+                    label: 'High Water Mark',
+                    data: hwms,
+                    borderColor: '#4488ff',
+                    borderDash: [5, 5],
+                    tension: 0.3,
+                    borderWidth: 1,
+                    pointRadius: 0
+                },
+                {
+                    label: 'Drawdown Floor',
+                    data: floors,
+                    borderColor: '#ff4466',
+                    borderDash: [3, 3],
+                    tension: 0.3,
+                    borderWidth: 1,
+                    pointRadius: 0,
+                    fill: false
+                }
+            ]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+                legend: { 
+                    labels: { color: '#888' },
+                    position: 'top'
+                }
+            },
+            scales: {
+                y: { 
+                    grid: { color: 'rgba(255,255,255,0.05)' }, 
+                    ticks: { 
+                        color: '#888',
+                        callback: (v) => '$' + v.toLocaleString()
+                    } 
+                },
+                x: { 
+                    grid: { color: 'rgba(255,255,255,0.05)' }, 
+                    ticks: { color: '#888' } 
+                }
+            }
+        }
+    });
+}
+
+// Render Apex Daily Table
+function renderApexDailyTable(data) {
+    const tbody = document.getElementById('apexDailyBody');
+    if (!tbody) return;
+    
+    const dailyHistory = data.daily_history || {};
+    const dates = Object.keys(dailyHistory).sort().reverse();
+    
+    if (dates.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="5"><div class="empty-state">No trading days recorded</div></td></tr>';
+        return;
+    }
+    
+    const maxDailyLoss = data.config?.max_daily_loss || 2500;
+    const totalProfit = Object.values(dailyHistory).filter(v => v > 0).reduce((a, b) => a + b, 0);
+    
+    tbody.innerHTML = dates.slice(0, 14).map(date => {
+        const pnl = dailyHistory[date];
+        const dailyPct = Math.abs(pnl) / maxDailyLoss * 100;
+        const profitPct = totalProfit > 0 && pnl > 0 ? (pnl / totalProfit * 100) : 0;
+        
+        let statusClass = 'ok';
+        let statusText = 'OK';
+        
+        if (pnl < 0) {
+            if (dailyPct >= 100) {
+                statusClass = 'critical';
+                statusText = 'LIMIT HIT';
+            } else if (dailyPct >= 80) {
+                statusClass = 'warning';
+                statusText = 'WARNING';
+            }
+        } else if (profitPct > 30) {
+            statusClass = 'warning';
+            statusText = 'CONSISTENCY';
+        }
+        
+        return `
+            <tr>
+                <td><span class="time-value">${date}</span></td>
+                <td><span class="price-value" style="color: var(--accent-${pnl >= 0 ? 'green' : 'red'})">${pnl >= 0 ? '+' : ''}$${pnl.toFixed(2)}</span></td>
+                <td>${pnl < 0 ? dailyPct.toFixed(1) + '%' : '-'}</td>
+                <td>${profitPct > 0 ? profitPct.toFixed(1) + '%' : '-'}</td>
+                <td><span class="status-badge ${statusClass}">${statusText}</span></td>
+            </tr>
+        `;
+    }).join('');
+}
+
+// Load Market Regime
+async function loadMarketRegime() {
+    try {
+        const response = await fetch('/api/coach/regime');
+        const data = await response.json();
+        
+        const regimeValue = document.getElementById('regimeValue');
+        const regimeBadge = document.getElementById('regimeBadge');
+        const regimeGuidance = document.getElementById('regimeGuidance');
+        
+        if (!regimeValue) return;
+        
+        const regime = data.regime || 'unknown';
+        const confidence = Math.round((data.confidence || 0) * 100);
+        
+        // Format regime name
+        const regimeNames = {
+            'trending_up': '📈 TRENDING UP',
+            'trending_down': '📉 TRENDING DOWN',
+            'ranging': '↔️ RANGING',
+            'high_volatility': '⚡ HIGH VOLATILITY',
+            'low_volatility': '😴 LOW VOLATILITY',
+            'choppy': '🌀 CHOPPY',
+            'unknown': '❓ ANALYZING'
+        };
+        
+        const regimeColors = {
+            'trending_up': '#00ff88',
+            'trending_down': '#ff4466',
+            'ranging': '#ffaa00',
+            'high_volatility': '#ff4466',
+            'low_volatility': '#4488ff',
+            'choppy': '#ffaa00',
+            'unknown': '#888'
+        };
+        
+        regimeValue.textContent = regimeNames[regime] || regime.toUpperCase();
+        regimeValue.style.color = regimeColors[regime] || '#888';
+        
+        regimeBadge.textContent = `${confidence}%`;
+        regimeBadge.className = `status-badge ${confidence >= 70 ? 'ok' : 'warning'}`;
+        
+        // Set guidance
+        const guidance = data.guidance || {};
+        let guidanceText = data.description || 'Analyzing market conditions...';
+        if (guidance.bias && guidance.bias !== 'neutral') {
+            guidanceText = `Favor ${guidance.bias.toUpperCase()} trades`;
+        }
+        regimeGuidance.textContent = guidanceText;
+        
+    } catch (error) {
+        console.error('Failed to load market regime:', error);
+    }
+}
+
+// Update Apex Quick Status on main dashboard
+function updateApexQuickStatus(data) {
+    const quickValue = document.getElementById('apexQuickValue');
+    const quickBadge = document.getElementById('apexQuickBadge');
+    const quickSubtitle = document.getElementById('apexQuickSubtitle');
+    
+    if (!quickValue) return;
+    
+    const dailyLoss = data.daily_loss || {};
+    const remaining = dailyLoss.remaining || 2500;
+    const maxAllowed = dailyLoss.max_allowed || 2500;
+    const status = dailyLoss.status || 'ok';
+    
+    quickValue.textContent = `$${remaining.toFixed(0)} / $${maxAllowed}`;
+    quickBadge.textContent = status.toUpperCase();
+    quickBadge.className = `status-badge ${status}`;
+    
+    if (status === 'blocked') {
+        quickSubtitle.textContent = '🚫 STOP TRADING';
+        quickSubtitle.style.color = 'var(--accent-red)';
+    } else if (status === 'warning') {
+        quickSubtitle.textContent = '⚠️ Approaching limit!';
+        quickSubtitle.style.color = 'var(--accent-yellow)';
+    } else {
+        quickSubtitle.textContent = 'Daily loss limit remaining';
+        quickSubtitle.style.color = 'var(--text-muted)';
     }
 }
 
@@ -1000,14 +1293,17 @@ document.addEventListener('DOMContentLoaded', () => {
     fetchTradeJournal();
     loadApexStatus();
     fetchCandleStatus();
+    loadMarketRegime();
     
     setInterval(fetchStatus, 2000);
     setInterval(fetchPerformance, 5000);
     setInterval(fetchTradeJournal, 3000);
     setInterval(loadApexStatus, 10000);
-    setInterval(fetchCandleStatus, 5000);  // Update candle status every 5s
+    setInterval(fetchCandleStatus, 5000);
+    setInterval(loadMarketRegime, 30000);  // Update market regime every 30s
     
     addLog('Dashboard v2 initialized', 'success');
     addLog('Apex rules tracking enabled', 'info');
+    addLog('Market regime detection active', 'info');
 });
 

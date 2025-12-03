@@ -11,7 +11,6 @@ Features:
 - Market Regime Detection
 """
 
-import sqlite3
 import json
 import os
 import re
@@ -19,15 +18,8 @@ from datetime import datetime, timedelta
 from collections import defaultdict
 import math
 
-# Database path
-DB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'trade_journal.db')
-
-
-def get_connection():
-    """Get database connection"""
-    conn = sqlite3.connect(DB_PATH, check_same_thread=False)
-    conn.row_factory = sqlite3.Row
-    return conn
+# Import shared database connection
+from database import get_connection
 
 
 # Statistical helper functions

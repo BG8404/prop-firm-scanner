@@ -29,7 +29,12 @@ except ImportError:
 
 # Add parent directory to path for imports
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from database import save_signal, get_recent_signals, get_performance_stats, init_database
+from database import (
+    save_signal, get_recent_signals, get_performance_stats, init_database,
+    get_ticker_list, get_ticker_settings, TICKERS,
+    save_candle as db_save_candle, save_candles_batch, load_candles,
+    load_all_candles, get_candle_counts, clear_old_candles
+)
 from outcome_tracker import start_tracking, resume_pending_tracking, get_tracking_status
 from apex_rules import (
     get_apex_status, update_apex_config, reset_apex_state,
@@ -131,36 +136,43 @@ def save_candle_history():
         print(f"⚠️  Error saving candle history: {e}")
 
 def load_candle_history():
-    """Load candle history from file on startup"""
+    """Load candle history from DATABASE on startup"""
     global candle_storage
     
-    if not os.path.exists(CANDLE_HISTORY_FILE):
-        print("📂 No candle history file found - starting fresh")
-        return False
-    
     try:
-        with open(CANDLE_HISTORY_FILE, 'r') as f:
-            data = json.load(f)
+        # Load from database
+        db_candles = load_all_candles()
+        
+        if not db_candles:
+            print("📂 No candle history in database - starting fresh")
+            return False
         
         total_loaded = 0
-        for tf in ["1m", "5m", "15m"]:
-            if tf in data:
-                for ticker, candles in data[tf].items():
+        
+        for ticker, timeframes in db_candles.items():
+            for tf in ["1m", "5m", "15m"]:
+                candles = timeframes.get(tf, [])
+                if candles:
                     maxlen = 100 if tf == "1m" else 50 if tf == "5m" else 30
                     candle_storage[tf][ticker] = deque(candles, maxlen=maxlen)
                     total_loaded += len(candles)
         
         if total_loaded > 0:
-            print(f"✅ Loaded {total_loaded} candles from history!")
-            for tf in ["1m", "5m", "15m"]:
-                for ticker, candles in candle_storage[tf].items():
-                    if len(candles) > 0:
-                        print(f"   {ticker}: {len(candle_storage['1m'].get(ticker, []))} x 1m, {len(candle_storage['5m'].get(ticker, []))} x 5m, {len(candle_storage['15m'].get(ticker, []))} x 15m")
-                        break  # Only print once per ticker
+            print(f"✅ Loaded {total_loaded} candles from database!")
+            # Print summary per ticker
+            printed_tickers = set()
+            for ticker in db_candles.keys():
+                if ticker not in printed_tickers:
+                    c1m = len(candle_storage['1m'].get(ticker, []))
+                    c5m = len(candle_storage['5m'].get(ticker, []))
+                    c15m = len(candle_storage['15m'].get(ticker, []))
+                    if c1m > 0 or c5m > 0 or c15m > 0:
+                        print(f"   {ticker}: {c1m} x 1m, {c5m} x 5m, {c15m} x 15m")
+                        printed_tickers.add(ticker)
             return True
         
     except Exception as e:
-        print(f"⚠️  Error loading candle history: {e}")
+        print(f"⚠️  Error loading candle history from database: {e}")
     
     return False
 
@@ -256,8 +268,10 @@ def get_max_ticks(ticker):
 
 
 def store_candle(ticker, timeframe, candle_data):
-    """Store candle in memory"""
+    """Store candle in memory AND database"""
     base_ticker = ticker.split(":")[0] if ":" in ticker else ticker
+    # Also remove =F suffix for consistency
+    base_ticker = base_ticker.replace('=F', '')
     
     # Ensure ticker exists in storage
     if base_ticker not in candle_storage[timeframe]:
@@ -267,11 +281,14 @@ def store_candle(ticker, timeframe, candle_data):
     candle_storage[timeframe][base_ticker].append(candle_data)
     print(f"  📊 Stored {timeframe} candle for {base_ticker} (total: {len(candle_storage[timeframe][base_ticker])})")
     
+    # Save to database for persistence
+    db_save_candle(base_ticker, timeframe, candle_data)
+    
     # Auto-aggregate 1m candles into 5m and 15m
     if timeframe == "1m":
         aggregate_candles(base_ticker)
         
-        # Auto-save every 5 candles (5 minutes)
+        # Auto-save JSON backup every 5 candles (5 minutes) - keeping as backup
         if len(candle_storage["1m"][base_ticker]) % 5 == 0:
             save_candle_history()
 
@@ -705,6 +722,18 @@ def get_trades():
         return jsonify({"error": str(e)}), 500
 
 
+# ========= TICKER API (Hardcoded: MNQ, MES, MGC) =========
+
+@app.route('/api/tickers', methods=['GET'])
+def api_get_tickers():
+    """Get all tickers (hardcoded)"""
+    tickers = [
+        {"symbol": sym, **data, "is_active": 1}
+        for sym, data in TICKERS.items()
+    ]
+    return jsonify(tickers)
+
+
 @app.route('/api/performance')
 def get_performance():
     """Get performance statistics"""
@@ -980,14 +1009,37 @@ def save_candles():
 @app.route('/api/candles/clear', methods=['POST'])
 def clear_candles():
     """Clear candle history (start fresh)"""
+    from database import clear_all_candles
+    
+    # Clear memory
     for tf in ["1m", "5m", "15m"]:
         for ticker in candle_storage[tf]:
             candle_storage[tf][ticker].clear()
     
+    # Clear JSON file
     if os.path.exists(CANDLE_HISTORY_FILE):
         os.remove(CANDLE_HISTORY_FILE)
     
+    # Clear database
+    clear_all_candles()
+    
+    add_log("Cleared all candle history", "warning")
     return jsonify({"status": "cleared"})
+
+
+@app.route('/api/candles/db-status', methods=['GET'])
+def candle_db_status():
+    """Get candle database statistics"""
+    try:
+        counts = get_candle_counts()
+        total = sum(sum(tf.values()) for tf in counts.values())
+        return jsonify({
+            "total_candles": total,
+            "by_ticker": counts,
+            "storage": "SQLite database"
+        })
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
 
 @app.route('/api/scan/all', methods=['GET'])

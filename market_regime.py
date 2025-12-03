@@ -4,23 +4,17 @@ Detects market conditions (trending, ranging, volatile) and suggests
 regime-specific strategy adjustments.
 """
 
-import sqlite3
 import json
 import os
 from datetime import datetime, timedelta
 from collections import deque
 import statistics
 
-# Database path
-DB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'trade_journal.db')
+# Import shared database connection
+from database import get_connection
+
+# State file
 REGIME_STATE_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'market_regime.json')
-
-
-def get_connection():
-    """Get database connection"""
-    conn = sqlite3.connect(DB_PATH, check_same_thread=False)
-    conn.row_factory = sqlite3.Row
-    return conn
 
 
 # Regime definitions

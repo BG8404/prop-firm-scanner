@@ -6,24 +6,18 @@ Measures actual vs projected impact of approved changes.
 
 import json
 import os
-import sqlite3
 from datetime import datetime, timedelta
 from threading import Lock
 
-# Database and state files
-DB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'trade_journal.db')
+# Import shared database connection
+from database import get_connection
+
+# State files
 SUGGESTIONS_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'coach_suggestions.json')
 SETTINGS_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'settings.json')
 
 # Thread safety
 suggestion_lock = Lock()
-
-
-def get_connection():
-    """Get database connection"""
-    conn = sqlite3.connect(DB_PATH, check_same_thread=False)
-    conn.row_factory = sqlite3.Row
-    return conn
 
 
 def init_suggestions_table():

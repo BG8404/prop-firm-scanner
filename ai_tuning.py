@@ -9,23 +9,17 @@ Features:
 - Auto-adjustment based on recent performance
 """
 
-import sqlite3
 import json
 import os
 from datetime import datetime, timedelta
 from collections import defaultdict
 
-# Database path
-DB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'trade_journal.db')
+# Import shared database connection
+from database import get_connection, DB_PATH
+
+# Settings and log files
 SETTINGS_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'settings.json')
 TUNING_LOG_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'tuning_log.json')
-
-
-def get_connection():
-    """Get database connection"""
-    conn = sqlite3.connect(DB_PATH, check_same_thread=False)
-    conn.row_factory = sqlite3.Row
-    return conn
 
 
 def load_settings():

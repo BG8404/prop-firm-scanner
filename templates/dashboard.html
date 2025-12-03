@@ -73,26 +73,50 @@
                 </div>
             </div>
 
-            <!-- Quick Apex Status -->
-            <div class="apex-panel" style="background: linear-gradient(135deg, rgba(0, 212, 255, 0.05), rgba(68, 136, 255, 0.05)); border-color: rgba(0, 212, 255, 0.2);">
-                <div class="apex-header">
-                    <span class="apex-title">⚡ Quick Status</span>
+            <!-- Market Regime & Quick Status -->
+            <div class="status-grid" style="margin-bottom: 24px;">
+                <!-- Market Regime Card -->
+                <div class="status-card" style="background: linear-gradient(135deg, rgba(170, 102, 255, 0.1), rgba(68, 136, 255, 0.05)); border-color: rgba(170, 102, 255, 0.3);">
+                    <div class="status-card-header">
+                        <span class="status-card-title">🌊 Market Regime</span>
+                        <span class="status-badge warning" id="regimeBadge">UNKNOWN</span>
+                    </div>
+                    <div class="status-value" id="regimeValue" style="font-size: 1.2rem; color: var(--accent-purple);">Detecting...</div>
+                    <div class="status-subtitle" id="regimeGuidance">Analyzing market conditions</div>
                 </div>
-                <div class="status-grid" style="margin-bottom: 0;">
-                    <div class="status-card" style="background: transparent; border: none; padding: 0;">
-                        <div class="status-card-title">Webhooks</div>
-                <div class="status-value green" id="webhookCount">0</div>
+
+                <!-- Apex Quick Status -->
+                <div class="status-card" style="background: linear-gradient(135deg, rgba(255, 68, 102, 0.08), rgba(255, 170, 0, 0.05)); border-color: rgba(255, 68, 102, 0.2);">
+                    <div class="status-card-header">
+                        <span class="status-card-title">⚠️ Apex Status</span>
+                        <span class="status-badge ok" id="apexQuickBadge">OK</span>
                     </div>
-                    <div class="status-card" style="background: transparent; border: none; padding: 0;">
-                        <div class="status-card-title">Signals</div>
-                        <div class="status-value yellow" id="signalCount">0</div>
+                    <div class="status-value" id="apexQuickValue" style="font-size: 1.2rem;">$0 / $2,500</div>
+                    <div class="status-subtitle" id="apexQuickSubtitle">Daily loss limit remaining</div>
+                </div>
+
+                <!-- System Status -->
+                <div class="status-card" style="background: linear-gradient(135deg, rgba(0, 212, 255, 0.08), rgba(68, 136, 255, 0.05)); border-color: rgba(0, 212, 255, 0.2);">
+                    <div class="status-card-header">
+                        <span class="status-card-title">📊 System</span>
+                        <span class="status-badge ok">Live</span>
                     </div>
-                    <div class="status-card" style="background: transparent; border: none; padding: 0;">
-                        <div class="status-card-title">Candles</div>
-                        <div class="status-value blue" id="candleCount">0</div>
+                    <div style="display: flex; justify-content: space-between; margin-top: 8px;">
+                        <div style="text-align: center;">
+                            <div class="status-value green" style="font-size: 1.1rem;" id="webhookCount">0</div>
+                            <div style="font-size: 0.7rem; color: var(--text-muted);">Webhooks</div>
+                        </div>
+                        <div style="text-align: center;">
+                            <div class="status-value yellow" style="font-size: 1.1rem;" id="signalCount">0</div>
+                            <div style="font-size: 0.7rem; color: var(--text-muted);">Signals</div>
+                        </div>
+                        <div style="text-align: center;">
+                            <div class="status-value blue" style="font-size: 1.1rem;" id="candleCount">0</div>
+                            <div style="font-size: 0.7rem; color: var(--text-muted);">Candles</div>
+                        </div>
                     </div>
+                </div>
             </div>
-        </div>
 
             <!-- Candle History Status -->
             <div class="settings-section" style="margin-bottom: 24px; background: linear-gradient(135deg, rgba(0, 212, 255, 0.08), rgba(68, 136, 255, 0.05)); border-color: rgba(0, 212, 255, 0.3);">
@@ -137,6 +161,24 @@
             </div>
         </div>
 
+        <!-- Active Tickers Display -->
+        <div class="settings-section" style="margin-bottom: 24px; background: linear-gradient(135deg, rgba(68, 136, 255, 0.08), rgba(170, 102, 255, 0.05)); border-color: rgba(68, 136, 255, 0.3);">
+            <div class="settings-header">
+                <div class="settings-title"><span>📈</span><span>Active Tickers</span></div>
+            </div>
+            <div style="padding: 16px; display: flex; gap: 12px; flex-wrap: wrap;">
+                <div class="ticker-badge" style="padding: 8px 16px; background: var(--bg-secondary); border-radius: 8px;">
+                    <strong>MNQ</strong> <span style="opacity: 0.7;">| $0.50/tick</span>
+                </div>
+                <div class="ticker-badge" style="padding: 8px 16px; background: var(--bg-secondary); border-radius: 8px;">
+                    <strong>MES</strong> <span style="opacity: 0.7;">| $1.25/tick</span>
+                </div>
+                <div class="ticker-badge" style="padding: 8px 16px; background: var(--bg-secondary); border-radius: 8px;">
+                    <strong>MGC</strong> <span style="opacity: 0.7;">| $1.00/tick</span>
+                </div>
+            </div>
+        </div>
+
         <!-- Settings Panel -->
         <div class="settings-section">
             <div class="settings-header" onclick="toggleSettings()">
@@ -170,11 +212,6 @@
                         <option value="3.0">3:1</option>
                     </select>
                 </div>
-                <div class="setting-group">
-                    <label class="setting-label">Tickers</label>
-                        <input type="text" class="setting-input" id="tickersInput" placeholder="Add ticker...">
-                        <div class="ticker-tags" id="tickerTags"></div>
-                    </div>
                     <div style="grid-column: 1 / -1; display: flex; gap: 12px; margin-top: 12px;">
                         <button class="btn btn-success" onclick="saveSettings()">💾 Save</button>
                         <button class="btn btn-outline" onclick="resetSettings()">↺ Reset</button>
@@ -292,6 +329,38 @@
                         <p style="font-size: 0.75rem; color: var(--text-muted); margin-top: 8px;">No day > 30% of total profits</p>
                     </div>
                 </div>
+            </div>
+
+            <!-- Daily P&L History Chart -->
+            <div class="chart-container" style="margin-bottom: 24px;">
+                <div class="chart-header">
+                    <span class="chart-title">📊 Daily P&L History</span>
+                    <span id="apexTotalPnlLabel" style="font-family: 'JetBrains Mono'; color: var(--accent-green);">$0</span>
+                </div>
+                <div class="chart-wrapper"><canvas id="apexPnlChart"></canvas></div>
+            </div>
+
+            <!-- Account Equity Curve -->
+            <div class="chart-container" style="margin-bottom: 24px;">
+                <div class="chart-header">
+                    <span class="chart-title">📈 Account Balance & Drawdown Floor</span>
+                </div>
+                <div class="chart-wrapper"><canvas id="apexEquityChart"></canvas></div>
+            </div>
+
+            <!-- Daily P&L Table -->
+            <div class="signals-container" style="margin-bottom: 24px;">
+                <div style="padding: 14px 18px; background: var(--bg-secondary); border-bottom: 1px solid var(--border-color);">
+                    <span style="font-weight: 600;">📅 Daily Breakdown</span>
+                </div>
+                <table class="signals-table">
+                    <thead>
+                        <tr><th>Date</th><th>P&L</th><th>% of Daily Limit</th><th>% of Total Profits</th><th>Status</th></tr>
+                    </thead>
+                    <tbody id="apexDailyBody">
+                        <tr><td colspan="5"><div class="empty-state">No trading days recorded</div></td></tr>
+                    </tbody>
+                </table>
             </div>
 
             <!-- Apex Configuration -->

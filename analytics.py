@@ -10,20 +10,11 @@ Features:
 - Streak tracking
 """
 
-import sqlite3
 from datetime import datetime, timedelta
 from collections import defaultdict
-import os
 
-# Database path
-DB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'trade_journal.db')
-
-
-def get_connection():
-    """Get database connection"""
-    conn = sqlite3.connect(DB_PATH, check_same_thread=False)
-    conn.row_factory = sqlite3.Row
-    return conn
+# Import shared database connection
+from database import get_connection
 
 
 def get_win_rate_chart_data(days=30):
