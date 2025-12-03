@@ -1,5 +1,5 @@
 """
-QuantCrawler Multi-Timeframe Analyzer
+SignalCrawler Multi-Timeframe Analyzer
 Advanced confidence scoring with 5 weighted components
 
 CONFIDENCE SCORING:
@@ -27,7 +27,7 @@ import statistics
 
 class MTFAnalyzer:
     """
-    QuantCrawler-style Multi-Timeframe Analyzer
+    SignalCrawler Multi-Timeframe Analyzer
     """
     
     # Confidence weights
@@ -574,5 +574,5 @@ def analyze_ticker(candles_15m, candles_5m, candles_1m, entry=None, stop=None, t
     return result
 
 
-print("✅ QuantCrawler MTF Analyzer loaded")
+print("✅ SignalCrawler MTF Analyzer loaded")
 print("   Weights: TF=40%, Structure=25%, Volume=15%, R:R=10%, Catalysts=10%")

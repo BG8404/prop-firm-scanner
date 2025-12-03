@@ -136,7 +136,7 @@ def send_discord_alert(ticker, signal, analysis_details=None):
                 {"name": "🎯 Target", "value": f"${target:.2f}" if target else "N/A", "inline": True},
                 {"name": "⚖️ Risk:Reward", "value": f"{rr}:1" if rr else "N/A", "inline": True},
             ],
-            "footer": {"text": "QuantCrawler Signal"},
+            "footer": {"text": "SignalCrawler"},
             "timestamp": datetime.now().isoformat()
         }
         
@@ -162,7 +162,7 @@ def send_discord_alert(ticker, signal, analysis_details=None):
         
         # Send to Discord
         payload = {
-            "username": "QuantCrawler",
+            "username": "SignalCrawler",
             "embeds": [embed]
         }
         
@@ -846,23 +846,23 @@ def test_discord():
         'entry': 21500.25,
         'stop': 21490.00,
         'takeProfit': 21520.00,
-        'rationale': '🧪 TEST ALERT - QuantCrawler is connected and working!'
+        'rationale': '🧪 TEST ALERT - SignalCrawler is connected and working!'
     }
     
     try:
         # Direct test with detailed error
         payload = {
-            "username": "QuantCrawler",
+            "username": "SignalCrawler",
             "embeds": [{
                 "title": "🧪 TEST - MNQ LONG",
-                "description": "QuantCrawler is connected and working!",
+                "description": "SignalCrawler is connected and working!",
                 "color": 0x00ff00,
                 "fields": [
                     {"name": "📊 Confidence", "value": "85%", "inline": True},
                     {"name": "📈 Entry", "value": "$21,500.25", "inline": True},
                     {"name": "🎯 Target", "value": "$21,520.00", "inline": True},
                 ],
-                "footer": {"text": "Test Alert from QuantCrawler"}
+                "footer": {"text": "Test Alert from SignalCrawler"}
             }]
         }
         
