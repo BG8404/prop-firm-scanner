@@ -1908,18 +1908,22 @@ def webhook():
                 return jsonify({"status": "stored", "message": "Aggregating 15m candles..."}), 200
             
             # Check if we should analyze (every N minutes, not every candle)
-            import datetime as dt
             now = dt.datetime.now()
             last_time = last_analysis_time.get(base_ticker)
             
             if last_time:
                 elapsed = (now - last_time).total_seconds() / 60
+                print(f"⏱️ {base_ticker}: Last analysis {elapsed:.1f} min ago (interval: {ANALYSIS_INTERVAL_MINUTES} min)")
                 if elapsed < ANALYSIS_INTERVAL_MINUTES:
-                    print(f"⏳ Candle stored. Next analysis in {ANALYSIS_INTERVAL_MINUTES - elapsed:.1f} min")
-                    return jsonify({"status": "stored", "message": f"Candle stored. Analysis in {ANALYSIS_INTERVAL_MINUTES - elapsed:.1f} min"}), 200
+                    remaining = ANALYSIS_INTERVAL_MINUTES - elapsed
+                    print(f"⏳ Skipping {base_ticker} - next analysis in {remaining:.1f} min")
+                    return jsonify({"status": "stored", "message": f"Candle stored. Analysis in {remaining:.1f} min"}), 200
+            else:
+                print(f"⏱️ {base_ticker}: First analysis (no previous time)")
             
             # Update last analysis time
             last_analysis_time[base_ticker] = now
+            print(f"⏱️ {base_ticker}: Analysis time set to {now.strftime('%H:%M:%S')}")
             
             print(f"\n📊 Running MTF Analysis on {ticker}...")
             print(f"   Data: {len(candles_15m)} x 15m, {len(candles_5m)} x 5m, {len(candles_1m)} x 1m")
