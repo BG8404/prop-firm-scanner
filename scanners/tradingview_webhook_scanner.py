@@ -85,6 +85,100 @@ EMAIL_USER = os.environ.get("EMAIL_USER", "")
 EMAIL_PASS = os.environ.get("EMAIL_PASS", "")
 # ================================
 
+# ========= DISCORD CONFIG =========
+DISCORD_WEBHOOK_URL = os.environ.get("DISCORD_WEBHOOK_URL", "")
+# ==================================
+
+
+def send_discord_alert(ticker, signal, analysis_details=None):
+    """Send trade signal alert to Discord"""
+    if not DISCORD_WEBHOOK_URL:
+        return False
+    
+    try:
+        direction = signal.get('direction', 'NO_TRADE')
+        confidence = signal.get('confidence', 0)
+        entry = signal.get('entry', 0)
+        stop = signal.get('stop', 0)
+        target = signal.get('takeProfit', 0)
+        
+        # Calculate R:R
+        if direction == 'LONG' and entry and stop and target:
+            risk = abs(entry - stop)
+            reward = abs(target - entry)
+            rr = round(reward / risk, 1) if risk > 0 else 0
+        elif direction == 'SHORT' and entry and stop and target:
+            risk = abs(stop - entry)
+            reward = abs(entry - target)
+            rr = round(reward / risk, 1) if risk > 0 else 0
+        else:
+            rr = 0
+        
+        # Emoji based on direction
+        if direction == 'LONG':
+            emoji = "🟢"
+            color = 0x00ff00  # Green
+        elif direction == 'SHORT':
+            emoji = "🔴"
+            color = 0xff0000  # Red
+        else:
+            emoji = "⚪"
+            color = 0x808080  # Gray
+        
+        # Build Discord embed
+        embed = {
+            "title": f"{emoji} {ticker} - {direction}",
+            "color": color,
+            "fields": [
+                {"name": "📊 Confidence", "value": f"{confidence}%", "inline": True},
+                {"name": "📈 Entry", "value": f"${entry:.2f}" if entry else "N/A", "inline": True},
+                {"name": "🛑 Stop", "value": f"${stop:.2f}" if stop else "N/A", "inline": True},
+                {"name": "🎯 Target", "value": f"${target:.2f}" if target else "N/A", "inline": True},
+                {"name": "⚖️ Risk:Reward", "value": f"{rr}:1" if rr else "N/A", "inline": True},
+            ],
+            "footer": {"text": "QuantCrawler Signal"},
+            "timestamp": datetime.now().isoformat()
+        }
+        
+        # Add rationale if available
+        rationale = signal.get('rationale', '')
+        if rationale:
+            embed["description"] = rationale[:500]  # Limit length
+        
+        # Add analysis breakdown if available
+        if analysis_details:
+            components = analysis_details.get('components', {})
+            if components:
+                breakdown = []
+                for name, data in components.items():
+                    score = data.get('score', '?')
+                    breakdown.append(f"• {name.title()}: {score}%")
+                if breakdown:
+                    embed["fields"].append({
+                        "name": "📋 Analysis Breakdown",
+                        "value": "\n".join(breakdown),
+                        "inline": False
+                    })
+        
+        # Send to Discord
+        payload = {
+            "username": "QuantCrawler",
+            "embeds": [embed]
+        }
+        
+        response = requests.post(DISCORD_WEBHOOK_URL, json=payload, timeout=10)
+        
+        if response.status_code in [200, 204]:
+            print(f"📱 Discord alert sent for {ticker}")
+            return True
+        else:
+            print(f"⚠️ Discord error: {response.status_code}")
+            return False
+            
+    except Exception as e:
+        print(f"⚠️ Discord alert failed: {e}")
+        return False
+
 # ========= QUALITY FILTERS =========
 MIN_CONFIDENCE = 70
 MAX_PRICE_DRIFT_TICKS = 15
@@ -1449,6 +1543,7 @@ def webhook():
                     print(f"📍 Signal #{signal_id} saved and tracking started")
                     
                     send_email_alert(ticker, signal, reasons)
+                    send_discord_alert(ticker, signal, mtf_result)
                 else:
                     print(f"\n⛔ SIGNAL REJECTED")
                     add_log(f"⛔ Rejected: {ticker} {direction.upper()} {confidence}%", "warning")
