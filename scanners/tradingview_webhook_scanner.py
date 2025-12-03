@@ -821,11 +821,24 @@ def get_trades():
 
 # ========= TICKER API (Hardcoded: MNQ, MES, MGC) =========
 
-@app.route('/api/test-discord', methods=['POST'])
+@app.route('/api/test-discord', methods=['POST', 'GET'])
 def test_discord():
     """Send a test Discord alert"""
-    if not DISCORD_WEBHOOK_URL:
-        return jsonify({"error": "DISCORD_WEBHOOK_URL not configured"}), 400
+    webhook_url = os.environ.get("DISCORD_WEBHOOK_URL", "")
+    
+    if not webhook_url:
+        return jsonify({
+            "error": "DISCORD_WEBHOOK_URL not configured",
+            "hint": "Add DISCORD_WEBHOOK_URL to Railway Variables"
+        }), 400
+    
+    # Validate URL format
+    if not webhook_url.startswith("https://discord.com/api/webhooks/"):
+        return jsonify({
+            "error": "Invalid webhook URL format",
+            "expected": "https://discord.com/api/webhooks/...",
+            "got_prefix": webhook_url[:50] + "..." if len(webhook_url) > 50 else webhook_url
+        }), 400
     
     test_signal = {
         'direction': 'LONG',
@@ -833,15 +846,38 @@ def test_discord():
         'entry': 21500.25,
         'stop': 21490.00,
         'takeProfit': 21520.00,
-        'rationale': '🧪 TEST ALERT - QuantCrawler is connected!'
+        'rationale': '🧪 TEST ALERT - QuantCrawler is connected and working!'
     }
     
-    success = send_discord_alert('TEST', test_signal)
-    
-    if success:
-        return jsonify({"status": "success", "message": "Test alert sent to Discord!"})
-    else:
-        return jsonify({"error": "Failed to send Discord alert"}), 500
+    try:
+        # Direct test with detailed error
+        payload = {
+            "username": "QuantCrawler",
+            "embeds": [{
+                "title": "🧪 TEST - MNQ LONG",
+                "description": "QuantCrawler is connected and working!",
+                "color": 0x00ff00,
+                "fields": [
+                    {"name": "📊 Confidence", "value": "85%", "inline": True},
+                    {"name": "📈 Entry", "value": "$21,500.25", "inline": True},
+                    {"name": "🎯 Target", "value": "$21,520.00", "inline": True},
+                ],
+                "footer": {"text": "Test Alert from QuantCrawler"}
+            }]
+        }
+        
+        response = requests.post(webhook_url, json=payload, timeout=10)
+        
+        if response.status_code in [200, 204]:
+            return jsonify({"status": "success", "message": "Test alert sent to Discord! Check your channel."})
+        else:
+            return jsonify({
+                "error": f"Discord returned status {response.status_code}",
+                "response": response.text[:200]
+            }), 500
+            
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
 
 @app.route('/api/tickers', methods=['GET'])
