@@ -2144,7 +2144,7 @@ if __name__ == '__main__':
                 "timestamp": sig.get('timestamp', ''),
                 "outcome": sig.get('outcome', 'PENDING')
             }
-            dashboard_stats["recent_signals"].append(signal_entry)
+            dashboard_stats["recent_signals"].appendleft(signal_entry)
         print(f"   Loaded {len(db_signals)} recent signals")
     except Exception as e:
         print(f"⚠️  Could not load recent signals: {e}")
