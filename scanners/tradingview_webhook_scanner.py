@@ -821,6 +821,34 @@ def get_trades():
 
 # ========= TICKER API (Hardcoded: MNQ, MES, MGC) =========
 
+@app.route('/api/clear-database', methods=['POST'])
+def clear_database():
+    """Clear all signals and start fresh"""
+    try:
+        from database import get_connection
+        conn = get_connection()
+        cursor = conn.cursor()
+        
+        # Clear signals
+        cursor.execute('DELETE FROM signal_recommendations')
+        cursor.execute('DELETE FROM signal_features')
+        cursor.execute('DELETE FROM daily_stats')
+        
+        # Reset strategy version stats
+        cursor.execute('''
+            UPDATE strategy_versions 
+            SET signals_generated = 0, wins = 0, losses = 0, win_rate = NULL
+        ''')
+        
+        conn.commit()
+        conn.close()
+        
+        add_log("🗑️ Database cleared - fresh start!", "warning")
+        return jsonify({"status": "success", "message": "Database cleared!"})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
 @app.route('/api/test-discord', methods=['POST', 'GET'])
 def test_discord():
     """Send a test Discord alert"""
@@ -1710,20 +1738,26 @@ if __name__ == '__main__':
     print("📍 Resuming tracking for pending signals...")
     resume_pending_tracking()
     
-    # Start ngrok tunnel
-    print("\n🌐 Starting ngrok tunnel...")
-    start_ngrok()
-    
-    # Open browser automatically
-    print("\n🌐 Opening dashboard in browser...")
-    threading.Thread(target=open_browser, daemon=True).start()
-    
-    print("\n🎨 DASHBOARD: http://localhost:5055")
     # Use PORT env var for cloud deployment, default to 5055 for local
     port = int(os.environ.get("PORT", 5055))
     
-    print(f"📡 LOCAL WEBHOOK: http://localhost:{port}/webhook")
-    print(f"💊 HEALTH: http://localhost:{port}/health")
+    # Check if running on Railway (skip ngrok)
+    railway_domain = os.environ.get('RAILWAY_PUBLIC_DOMAIN')
+    if railway_domain:
+        print(f"\n☁️  RUNNING ON RAILWAY CLOUD")
+        print(f"🌐 Dashboard: https://{railway_domain}")
+        print(f"📡 Webhook: https://{railway_domain}/webhook")
+    else:
+        # Local development - ngrok is optional
+        print("\n🏠 RUNNING LOCALLY")
+        print(f"🎨 Dashboard: http://localhost:{port}")
+        print(f"📡 Webhook: http://localhost:{port}/webhook")
+        print(f"💡 For public webhook, run: ngrok http {port}")
+        
+        # Open browser automatically (local only)
+        threading.Thread(target=open_browser, daemon=True).start()
+    
+    print(f"💊 Health: http://localhost:{port}/health")
     print("="*60 + "\n")
     
     # Run Flask (use_reloader=False to prevent double ngrok)

@@ -134,14 +134,23 @@ function clearLogs() {
     addLog('Logs cleared', 'info');
 }
 
-// ngrok URL
-function copyNgrokUrl() {
-    const url = document.getElementById('ngrokUrl').textContent;
-    navigator.clipboard.writeText(url).then(() => {
+// Webhook URL
+function copyWebhookUrl() {
+    const input = document.getElementById('webhookUrl');
+    navigator.clipboard.writeText(input.value).then(() => {
         const btn = document.querySelector('.copy-btn');
         btn.textContent = '✓ Copied!';
         setTimeout(() => btn.textContent = '📋 Copy', 2000);
     });
+}
+
+// Set webhook URL based on current location
+function setWebhookUrl() {
+    const webhookInput = document.getElementById('webhookUrl');
+    if (webhookInput) {
+        const baseUrl = window.location.origin;
+        webhookInput.value = baseUrl + '/webhook';
+    }
 }
 
 // Manual scan using Yahoo Finance
@@ -276,12 +285,8 @@ async function fetchStatus() {
         document.getElementById('webhookCount').textContent = data.webhook_count || 0;
         document.getElementById('signalCount').textContent = data.signal_count || 0;
         
-        if (data.ngrok_url) {
-            const newUrl = data.ngrok_url + '/webhook';
-            document.getElementById('ngrokUrl').textContent = newUrl;
-        } else {
-            document.getElementById('ngrokUrl').textContent = 'ngrok not running - start with: ngrok http 5055';
-        }
+        // Webhook URL is set automatically from current location
+        setWebhookUrl();
         
         if (data.recent_signals) {
             data.recent_signals.forEach(signal => {
@@ -391,20 +396,56 @@ async function fetchTradeJournal() {
 }
 
 function getTradeRowHTML(trade) {
-    const outcomeClass = trade.outcome === 'win' ? 'ok' : trade.outcome === 'loss' ? 'critical' : 'warning';
-    const outcomeText = trade.outcome === 'win' ? '✅ WIN' : trade.outcome === 'loss' ? '❌ LOSS' : trade.outcome === 'expired' ? '⏰ EXPIRED' : '⏳ PENDING';
+    const outcomeClass = trade.outcome === 'win' || trade.outcome === 'WIN' ? 'ok' : 
+                         trade.outcome === 'loss' || trade.outcome === 'LOSS' ? 'critical' : 'warning';
+    const outcomeText = trade.outcome === 'win' || trade.outcome === 'WIN' ? '✅ WIN' : 
+                        trade.outcome === 'loss' || trade.outcome === 'LOSS' ? '❌ LOSS' : 
+                        trade.outcome === 'expired' || trade.outcome === 'DISCARDED' ? '⏰ EXPIRED' : '⏳ PENDING';
     const pnl = trade.pnl_ticks ? (trade.pnl_ticks >= 0 ? '+' + trade.pnl_ticks.toFixed(1) : trade.pnl_ticks.toFixed(1)) : '--';
     const pnlClass = trade.pnl_ticks >= 0 ? 'green' : 'red';
-    const directionClass = trade.direction === 'long' ? 'long' : trade.direction === 'short' ? 'short' : 'no_trade';
-    const directionIcon = trade.direction === 'long' ? '📈' : trade.direction === 'short' ? '📉' : '⏸️';
+    const dir = (trade.direction || '').toLowerCase();
+    const directionClass = dir === 'long' ? 'long' : dir === 'short' ? 'short' : 'no_trade';
+    const directionIcon = dir === 'long' ? '📈' : dir === 'short' ? '📉' : '⏸️';
+    
+    // Confidence display
+    const confidence = trade.confidence || trade.confidence_score || 0;
+    const confClass = confidence >= 80 ? 'green' : confidence >= 70 ? 'yellow' : 'red';
+    
+    // Live direction indicator for pending trades
+    let liveIndicator = '--';
+    if ((trade.outcome === 'PENDING' || trade.outcome === 'pending') && trade.entry_price && trade.current_price) {
+        const entry = parseFloat(trade.entry_price);
+        const current = parseFloat(trade.current_price);
+        const target = parseFloat(trade.target_price);
+        const stop = parseFloat(trade.stop_price);
+        
+        if (dir === 'long') {
+            if (current > entry) {
+                const progress = Math.min(((current - entry) / (target - entry)) * 100, 100);
+                liveIndicator = `<span style="color: var(--accent-green)">▲ +${(current - entry).toFixed(2)}</span>`;
+            } else {
+                liveIndicator = `<span style="color: var(--accent-red)">▼ ${(current - entry).toFixed(2)}</span>`;
+            }
+        } else if (dir === 'short') {
+            if (current < entry) {
+                liveIndicator = `<span style="color: var(--accent-green)">▼ +${(entry - current).toFixed(2)}</span>`;
+            } else {
+                liveIndicator = `<span style="color: var(--accent-red)">▲ ${(entry - current).toFixed(2)}</span>`;
+            }
+        }
+    } else if (trade.outcome !== 'PENDING' && trade.outcome !== 'pending') {
+        liveIndicator = trade.outcome === 'WIN' || trade.outcome === 'win' ? '✅' : '❌';
+    }
     
     return `
         <td><span class="time-value">${trade.timestamp?.split(' ')[1] || '--'}</span></td>
         <td><span class="ticker-badge">${trade.ticker}</span></td>
-        <td><span class="direction-badge ${directionClass}">${directionIcon} ${trade.direction?.toUpperCase()}</span></td>
+        <td><span class="direction-badge ${directionClass}">${directionIcon} ${(trade.direction || '').toUpperCase()}</span></td>
+        <td><span class="price-value" style="color: var(--accent-${confClass})">${confidence}%</span></td>
         <td><span class="price-value">${trade.entry_price?.toFixed(2) || '--'}</span></td>
         <td><span class="price-value">${trade.stop_price?.toFixed(2) || '--'}</span></td>
         <td><span class="price-value">${trade.target_price?.toFixed(2) || '--'}</span></td>
+        <td>${liveIndicator}</td>
         <td><span class="status-badge ${outcomeClass}">${outcomeText}</span></td>
         <td><span class="price-value" style="color: var(--accent-${pnlClass})">${pnl}</span></td>
     `;
@@ -1288,6 +1329,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
     
     loadSettings();
+    setWebhookUrl();
     fetchStatus();
     fetchPerformance();
     fetchTradeJournal();

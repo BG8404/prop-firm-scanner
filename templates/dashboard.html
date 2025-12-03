@@ -150,14 +150,14 @@
                 </div>
             </div>
 
-            <!-- ngrok URL -->
+            <!-- Webhook URL -->
             <div class="settings-section" style="margin-bottom: 24px;">
                 <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
                     <span style="font-weight: 600;">📡 TradingView Webhook URL</span>
                 </div>
                 <div style="display: flex; gap: 12px;">
-                    <input type="text" class="setting-input" id="ngrokUrl" readonly value="Fetching ngrok URL..." style="flex: 1;">
-                    <button class="btn btn-primary copy-btn" onclick="copyNgrokUrl()">📋 Copy</button>
+                    <input type="text" class="setting-input" id="webhookUrl" readonly value="Loading..." style="flex: 1;">
+                    <button class="btn btn-primary copy-btn" onclick="copyWebhookUrl()">📋 Copy</button>
             </div>
         </div>
 
@@ -230,11 +230,11 @@
             <table class="signals-table">
                 <thead>
                     <tr>
-                            <th>Time</th><th>Ticker</th><th>Direction</th><th>Entry</th><th>Stop</th><th>Target</th><th>Outcome</th><th>P&L</th>
+                            <th>Time</th><th>Ticker</th><th>Direction</th><th>Conf</th><th>Entry</th><th>Stop</th><th>Target</th><th>Live</th><th>Outcome</th><th>P&L</th>
                     </tr>
                 </thead>
                 <tbody id="tradeJournalBody">
-                        <tr><td colspan="8"><div class="empty-state"><div class="empty-state-icon">📔</div><div class="empty-state-text">No trades logged yet</div></div></td></tr>
+                        <tr><td colspan="10"><div class="empty-state"><div class="empty-state-icon">📔</div><div class="empty-state-text">No trades logged yet</div></div></td></tr>
                 </tbody>
             </table>
         </div>
