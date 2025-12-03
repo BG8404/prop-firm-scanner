@@ -1087,7 +1087,7 @@ def run_analysis(ticker_symbol=None, send_alerts=False):
                 continue
             
             # Run MTF analysis
-            mtf_result = analyze_ticker(candles_15m, candles_5m, candles_1m)
+            mtf_result = mtf_analyze(candles_15m, candles_5m, candles_1m)
             
             direction = mtf_result.get('direction', 'STAY_AWAY')
             confidence = mtf_result.get('confidence', 0)
