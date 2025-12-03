@@ -1614,21 +1614,7 @@ def webhook():
                 else:
                     print(f"\n⛔ SIGNAL REJECTED")
                     add_log(f"⛔ Rejected: {ticker} {direction.upper()} {confidence}%", "warning")
-                    
-                    # Save rejected signal too (for analysis)
-                    signal_to_save = {
-                        'ticker': ticker,
-                        'direction': direction,
-                        'confidence': confidence,
-                        'entry': signal.get('entry'),
-                        'stop': signal.get('stop'),
-                        'takeProfit': signal.get('takeProfit'),
-                        'currentPrice': signal.get('currentPrice'),
-                        'entryType': signal.get('entryType'),
-                        'rationale': signal.get('rationale'),
-                        'is_valid': False
-                    }
-                    save_signal(signal_to_save)
+                    # Rejected signals NOT saved to Trade Journal - only shown in Recent Signals
             else:
                 print(f"   No trade recommended")
                 add_log(f"📊 {ticker}: No trade ({confidence}%)", "info")
