@@ -93,14 +93,17 @@ DISCORD_WEBHOOK_URL = os.environ.get("DISCORD_WEBHOOK_URL", "")
 def send_discord_alert(ticker, signal, analysis_details=None):
     """Send trade signal alert to Discord"""
     if not DISCORD_WEBHOOK_URL:
+        print("⚠️ Discord webhook not configured")
         return False
     
     try:
-        direction = signal.get('direction', 'NO_TRADE')
+        direction = (signal.get('direction', 'NO_TRADE') or '').upper()
         confidence = signal.get('confidence', 0)
         entry = signal.get('entry', 0)
         stop = signal.get('stop', 0)
         target = signal.get('takeProfit', 0)
+        
+        print(f"📱 Sending Discord alert: {ticker} {direction} {confidence}%")
         
         # Calculate R:R
         if direction == 'LONG' and entry and stop and target:
@@ -121,6 +124,9 @@ def send_discord_alert(ticker, signal, analysis_details=None):
         elif direction == 'SHORT':
             emoji = "🔴"
             color = 0xff0000  # Red
+        elif 'REJECT' in direction:
+            emoji = "⚠️"
+            color = 0xffa500  # Orange
         else:
             emoji = "⚪"
             color = 0x808080  # Gray
@@ -181,10 +187,15 @@ def send_discord_alert(ticker, signal, analysis_details=None):
 
 # ========= QUALITY FILTERS =========
 MIN_CONFIDENCE = 70
+MIN_DISCORD_CONFIDENCE = 80  # Only Discord alert above this
 MAX_PRICE_DRIFT_TICKS = 15
 REQUIRE_MOMENTUM_ALIGNMENT = True
 MIN_RISK_REWARD = 1.5
+ANALYSIS_INTERVAL_MINUTES = 5  # Only auto-analyze every N minutes
 # ===================================
+
+# Track last analysis time per ticker
+last_analysis_time = {}
 
 # ========= PRODUCT SETTINGS =========
 TICK_SIZES = {
@@ -820,6 +831,78 @@ def get_trades():
 
 
 # ========= TICKER API (Hardcoded: MNQ, MES, MGC) =========
+
+@app.route('/api/analyze', methods=['POST', 'GET'])
+@app.route('/api/analyze/<ticker_symbol>', methods=['POST', 'GET'])
+def analyze_on_demand(ticker_symbol=None):
+    """
+    On-demand analysis - trigger from phone/Discord/browser
+    GET /api/analyze - Analyze all tickers
+    GET /api/analyze/MNQ - Analyze specific ticker
+    """
+    try:
+        from database import TICKERS
+        
+        results = []
+        tickers_to_analyze = [ticker_symbol.upper()] if ticker_symbol else list(TICKERS.keys())
+        
+        for ticker in tickers_to_analyze:
+            base_ticker = ticker.replace('=F', '').replace('Z2025', '').replace('Z2026', '')
+            
+            # Get candle data
+            candles_1m = list(candle_storage["1m"].get(base_ticker, []))
+            candles_5m = list(candle_storage["5m"].get(base_ticker, []))
+            candles_15m = list(candle_storage["15m"].get(base_ticker, []))
+            
+            if len(candles_1m) < 10:
+                results.append({
+                    "ticker": ticker,
+                    "status": "insufficient_data",
+                    "message": f"Need more candles: {len(candles_1m)}/10"
+                })
+                continue
+            
+            # Run MTF analysis
+            mtf_result = analyze_ticker(candles_15m, candles_5m, candles_1m)
+            
+            direction = mtf_result.get('direction', 'STAY_AWAY')
+            confidence = mtf_result.get('confidence', 0)
+            
+            result = {
+                "ticker": ticker,
+                "direction": direction,
+                "confidence": confidence,
+                "entry": mtf_result.get('entry'),
+                "stop": mtf_result.get('stop'),
+                "target": mtf_result.get('target'),
+                "risk_reward": mtf_result.get('risk_reward'),
+                "warnings": mtf_result.get('warnings', []),
+                "stay_away_reason": mtf_result.get('stay_away_reason')
+            }
+            results.append(result)
+            
+            # Send Discord alert for valid signals
+            if direction in ('LONG', 'SHORT') and confidence >= MIN_DISCORD_CONFIDENCE:
+                signal = {
+                    'direction': direction,
+                    'confidence': confidence,
+                    'entry': mtf_result.get('entry'),
+                    'stop': mtf_result.get('stop'),
+                    'takeProfit': mtf_result.get('target'),
+                    'rationale': mtf_result.get('rationale', '')
+                }
+                send_discord_alert(ticker, signal, mtf_result)
+                add_log(f"📱 On-demand: {ticker} {direction} {confidence}%", "success")
+        
+        return jsonify({
+            "status": "success",
+            "analyzed_at": datetime.now().isoformat(),
+            "results": results
+        })
+        
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
 
 @app.route('/api/debug-signals', methods=['GET'])
 def debug_signals():
@@ -1560,6 +1643,20 @@ def webhook():
                 print(f"⏳ Building 15m candles... ({len(candles_15m)} available, need 2)")
                 return jsonify({"status": "stored", "message": "Aggregating 15m candles..."}), 200
             
+            # Check if we should analyze (every N minutes, not every candle)
+            import datetime as dt
+            now = dt.datetime.now()
+            last_time = last_analysis_time.get(base_ticker)
+            
+            if last_time:
+                elapsed = (now - last_time).total_seconds() / 60
+                if elapsed < ANALYSIS_INTERVAL_MINUTES:
+                    print(f"⏳ Candle stored. Next analysis in {ANALYSIS_INTERVAL_MINUTES - elapsed:.1f} min")
+                    return jsonify({"status": "stored", "message": f"Candle stored. Analysis in {ANALYSIS_INTERVAL_MINUTES - elapsed:.1f} min"}), 200
+            
+            # Update last analysis time
+            last_analysis_time[base_ticker] = now
+            
             print(f"\n📊 Running MTF Analysis on {ticker}...")
             print(f"   Data: {len(candles_15m)} x 15m, {len(candles_5m)} x 5m, {len(candles_1m)} x 1m")
             
@@ -1652,7 +1749,12 @@ def webhook():
                     print(f"📍 Signal #{signal_id} saved and tracking started")
                     
                     send_email_alert(ticker, signal, reasons)
-                    send_discord_alert(ticker, signal, mtf_result)
+                    
+                    # Only Discord alert for high-confidence signals
+                    if confidence >= MIN_DISCORD_CONFIDENCE:
+                        send_discord_alert(ticker, signal, mtf_result)
+                    else:
+                        print(f"   📱 Discord skipped (conf {confidence}% < {MIN_DISCORD_CONFIDENCE}%)")
                 else:
                     print(f"\n⛔ SIGNAL REJECTED")
                     add_log(f"⛔ Rejected: {ticker} {direction.upper()} {confidence}%", "warning")
