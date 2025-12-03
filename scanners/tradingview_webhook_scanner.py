@@ -835,11 +835,214 @@ def get_trades():
 @app.route('/api/analyze', methods=['POST', 'GET'])
 @app.route('/api/analyze/<ticker_symbol>', methods=['POST', 'GET'])
 def analyze_on_demand(ticker_symbol=None):
+    """On-demand analysis API - returns JSON"""
+    results = run_analysis(ticker_symbol)
+    return jsonify({
+        "status": "success",
+        "analyzed_at": dt.datetime.now().isoformat(),
+        "results": results
+    })
+
+
+@app.route('/analyze', methods=['GET'])
+@app.route('/analyze/<ticker_symbol>', methods=['GET'])
+def analyze_mobile(ticker_symbol=None):
     """
-    On-demand analysis - trigger from phone/Discord/browser
-    GET /api/analyze - Analyze all tickers
-    GET /api/analyze/MNQ - Analyze specific ticker
+    Mobile-friendly analysis page
+    GET /analyze - Analyze all tickers (nice HTML page)
+    GET /analyze/MNQ - Analyze specific ticker
     """
+    results = run_analysis(ticker_symbol, send_alerts=True)
+    
+    # Build mobile-friendly HTML
+    html = f'''
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <title>SignalCrawler Analysis</title>
+        <style>
+            * {{ margin: 0; padding: 0; box-sizing: border-box; }}
+            body {{ 
+                font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+                background: #0a0a0f;
+                color: #e0e0e0;
+                padding: 20px;
+                min-height: 100vh;
+            }}
+            h1 {{ 
+                text-align: center; 
+                margin-bottom: 20px;
+                font-size: 1.5rem;
+                color: #fff;
+            }}
+            .time {{ 
+                text-align: center; 
+                color: #888; 
+                font-size: 0.8rem;
+                margin-bottom: 20px;
+            }}
+            .card {{
+                background: #1a1a24;
+                border-radius: 12px;
+                padding: 16px;
+                margin-bottom: 16px;
+                border: 1px solid #2a2a3a;
+            }}
+            .ticker {{ 
+                font-size: 1.4rem; 
+                font-weight: bold;
+                margin-bottom: 8px;
+            }}
+            .direction {{
+                display: inline-block;
+                padding: 6px 16px;
+                border-radius: 20px;
+                font-weight: bold;
+                font-size: 1rem;
+                margin-bottom: 12px;
+            }}
+            .long {{ background: #00c853; color: #000; }}
+            .short {{ background: #ff1744; color: #fff; }}
+            .stay_away {{ background: #666; color: #fff; }}
+            .insufficient {{ background: #333; color: #888; }}
+            .confidence {{
+                font-size: 2rem;
+                font-weight: bold;
+                margin: 8px 0;
+            }}
+            .conf-high {{ color: #00c853; }}
+            .conf-med {{ color: #ffc107; }}
+            .conf-low {{ color: #ff1744; }}
+            .prices {{
+                display: grid;
+                grid-template-columns: repeat(3, 1fr);
+                gap: 8px;
+                margin-top: 12px;
+            }}
+            .price-box {{
+                background: #0a0a0f;
+                padding: 8px;
+                border-radius: 8px;
+                text-align: center;
+            }}
+            .price-label {{ font-size: 0.7rem; color: #888; }}
+            .price-value {{ font-size: 1rem; font-weight: bold; }}
+            .warning {{
+                background: #332200;
+                border: 1px solid #664400;
+                padding: 8px;
+                border-radius: 8px;
+                margin-top: 8px;
+                font-size: 0.85rem;
+                color: #ffaa00;
+            }}
+            .btn {{
+                display: block;
+                width: 100%;
+                padding: 16px;
+                background: #4488ff;
+                color: #fff;
+                border: none;
+                border-radius: 12px;
+                font-size: 1.1rem;
+                font-weight: bold;
+                cursor: pointer;
+                margin-top: 20px;
+                text-decoration: none;
+                text-align: center;
+            }}
+            .btn:active {{ background: #3366cc; }}
+        </style>
+    </head>
+    <body>
+        <h1>🕷️ SignalCrawler</h1>
+        <div class="time">Analyzed: {dt.datetime.now().strftime("%I:%M:%S %p")}</div>
+    '''
+    
+    for r in results:
+        ticker = r.get('ticker', 'UNKNOWN')
+        status = r.get('status', '')
+        direction = r.get('direction', 'STAY_AWAY')
+        confidence = r.get('confidence', 0)
+        entry = r.get('entry')
+        stop = r.get('stop')
+        target = r.get('target')
+        rr = r.get('risk_reward', 0)
+        warnings = r.get('warnings', [])
+        stay_reason = r.get('stay_away_reason', '')
+        message = r.get('message', '')
+        
+        # Direction styling
+        if status == 'insufficient_data':
+            dir_class = 'insufficient'
+            dir_text = '⏳ LOADING'
+        elif direction == 'LONG':
+            dir_class = 'long'
+            dir_text = '🟢 LONG'
+        elif direction == 'SHORT':
+            dir_class = 'short'
+            dir_text = '🔴 SHORT'
+        else:
+            dir_class = 'stay_away'
+            dir_text = '⚪ STAY AWAY'
+        
+        # Confidence styling
+        conf_class = 'conf-high' if confidence >= 80 else 'conf-med' if confidence >= 70 else 'conf-low'
+        
+        html += f'''
+        <div class="card">
+            <div class="ticker">{ticker}</div>
+            <span class="direction {dir_class}">{dir_text}</span>
+        '''
+        
+        if status != 'insufficient_data':
+            html += f'''
+            <div class="confidence {conf_class}">{confidence}%</div>
+            '''
+            
+            if entry and stop and target:
+                html += f'''
+                <div class="prices">
+                    <div class="price-box">
+                        <div class="price-label">ENTRY</div>
+                        <div class="price-value">${entry:.2f}</div>
+                    </div>
+                    <div class="price-box">
+                        <div class="price-label">STOP</div>
+                        <div class="price-value">${stop:.2f}</div>
+                    </div>
+                    <div class="price-box">
+                        <div class="price-label">TARGET</div>
+                        <div class="price-value">${target:.2f}</div>
+                    </div>
+                </div>
+                '''
+                if rr:
+                    html += f'<div style="text-align:center;margin-top:8px;color:#888;">R:R {rr}:1</div>'
+            
+            if stay_reason:
+                html += f'<div class="warning">🚫 {stay_reason}</div>'
+            
+            for w in warnings[:2]:
+                html += f'<div class="warning">⚠️ {w}</div>'
+        else:
+            html += f'<div style="color:#888;margin-top:8px;">{message}</div>'
+        
+        html += '</div>'
+    
+    html += '''
+        <a href="/analyze" class="btn">🔄 Refresh Analysis</a>
+        <a href="/" class="btn" style="background:#333;">📊 Full Dashboard</a>
+    </body>
+    </html>
+    '''
+    
+    return html
+
+
+def run_analysis(ticker_symbol=None, send_alerts=False):
+    """Run analysis and return results"""
     try:
         from database import TICKERS
         
@@ -882,7 +1085,7 @@ def analyze_on_demand(ticker_symbol=None):
             results.append(result)
             
             # Send Discord alert for valid signals
-            if direction in ('LONG', 'SHORT') and confidence >= MIN_DISCORD_CONFIDENCE:
+            if send_alerts and direction in ('LONG', 'SHORT') and confidence >= MIN_DISCORD_CONFIDENCE:
                 signal = {
                     'direction': direction,
                     'confidence': confidence,
@@ -894,14 +1097,10 @@ def analyze_on_demand(ticker_symbol=None):
                 send_discord_alert(ticker, signal, mtf_result)
                 add_log(f"📱 On-demand: {ticker} {direction} {confidence}%", "success")
         
-        return jsonify({
-            "status": "success",
-            "analyzed_at": dt.datetime.now().isoformat(),
-            "results": results
-        })
+        return results
         
     except Exception as e:
-        return jsonify({"error": str(e)}), 500
+        return [{"error": str(e)}]
 
 
 @app.route('/api/debug-signals', methods=['GET'])
