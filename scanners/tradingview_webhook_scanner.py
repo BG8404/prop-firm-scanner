@@ -851,7 +851,9 @@ def update_settings():
 def get_trades():
     """Get trade history from database"""
     try:
-        trades = get_recent_signals(limit=100)
+        limit = request.args.get('limit', 15, type=int)  # Default 15, max 100
+        limit = min(limit, 100)  # Cap at 100
+        trades = get_recent_signals(limit=limit)
         return jsonify(trades)
     except Exception as e:
         return jsonify({"error": str(e)}), 500

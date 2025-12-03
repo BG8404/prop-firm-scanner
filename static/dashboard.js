@@ -312,7 +312,7 @@ async function fetchPerformance() {
 // Trade journal
 async function fetchTradeJournal() {
     try {
-        const response = await fetch('/api/trades');
+        const response = await fetch('/api/trades?limit=15');
         const trades = await response.json();
         if (trades.length === 0) return;
         
