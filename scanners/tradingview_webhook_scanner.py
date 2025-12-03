@@ -2133,7 +2133,12 @@ if __name__ == '__main__':
     try:
         db_signals = get_recent_signals(limit=50)
         for sig in reversed(db_signals):  # Oldest first so newest ends up at front
+            # Extract time from timestamp or time_of_day
+            ts = sig.get('time_of_day') or sig.get('timestamp', '')
+            time_str = ts[-8:] if len(ts) >= 8 else ts  # Get HH:MM:SS part
+            
             signal_entry = {
+                "time": time_str,  # Dashboard looks for "time" key
                 "ticker": sig.get('ticker', ''),
                 "direction": sig.get('direction', ''),
                 "confidence": sig.get('confidence', 0),
@@ -2141,7 +2146,7 @@ if __name__ == '__main__':
                 "stop": sig.get('stop_price'),
                 "target": sig.get('target_price'),
                 "rationale": sig.get('rationale', ''),
-                "timestamp": sig.get('timestamp', ''),
+                "valid": sig.get('outcome') != 'PENDING',  # Show valid status
                 "outcome": sig.get('outcome', 'PENDING')
             }
             dashboard_stats["recent_signals"].appendleft(signal_entry)
