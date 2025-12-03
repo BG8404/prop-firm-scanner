@@ -821,6 +821,29 @@ def get_trades():
 
 # ========= TICKER API (Hardcoded: MNQ, MES, MGC) =========
 
+@app.route('/api/test-discord', methods=['POST'])
+def test_discord():
+    """Send a test Discord alert"""
+    if not DISCORD_WEBHOOK_URL:
+        return jsonify({"error": "DISCORD_WEBHOOK_URL not configured"}), 400
+    
+    test_signal = {
+        'direction': 'LONG',
+        'confidence': 85,
+        'entry': 21500.25,
+        'stop': 21490.00,
+        'takeProfit': 21520.00,
+        'rationale': '🧪 TEST ALERT - QuantCrawler is connected!'
+    }
+    
+    success = send_discord_alert('TEST', test_signal)
+    
+    if success:
+        return jsonify({"status": "success", "message": "Test alert sent to Discord!"})
+    else:
+        return jsonify({"error": "Failed to send Discord alert"}), 500
+
+
 @app.route('/api/tickers', methods=['GET'])
 def api_get_tickers():
     """Get all tickers (hardcoded)"""
