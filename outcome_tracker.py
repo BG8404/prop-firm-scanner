@@ -235,3 +235,67 @@ def get_tracking_status():
         'signal_ids': list(tracked_signals.keys())
     }
 
+
+def check_all_pending_outcomes():
+    """
+    Check ALL pending signals for outcomes - more reliable than threads.
+    Returns list of updated signals.
+    """
+    pending = get_pending_signals()
+    updated = []
+    
+    for signal in pending:
+        try:
+            outcome, price, pnl = check_signal_outcome(signal)
+            
+            if outcome:
+                emoji = '✅' if outcome == 'WIN' else '❌'
+                print(f"{emoji} Signal #{signal['id']} {outcome}: {signal['ticker']} @ {price:.2f} (P&L: {pnl:+.2f})")
+                update_signal_outcome(signal['id'], outcome, price, pnl)
+                
+                updated.append({
+                    'id': signal['id'],
+                    'ticker': signal['ticker'],
+                    'outcome': outcome,
+                    'price': price,
+                    'pnl': pnl
+                })
+                
+                # Update Apex rules tracking
+                if APEX_ENABLED:
+                    try:
+                        apex_result = record_trade_result(signal['ticker'], pnl)
+                        if apex_result.get('alerts'):
+                            for alert in apex_result['alerts']:
+                                print(f"🚨 APEX ALERT: {alert['title']}")
+                    except Exception as e:
+                        print(f"⚠️  Error updating Apex tracking: {e}")
+        
+        except Exception as e:
+            print(f"⚠️  Error checking signal #{signal.get('id')}: {e}")
+    
+    return updated
+
+
+def start_outcome_checker(interval_seconds=30):
+    """
+    Start a reliable periodic outcome checker.
+    Runs every interval_seconds to check all pending trades.
+    """
+    def checker_loop():
+        while tracking_active:
+            try:
+                pending = get_pending_signals()
+                if pending:
+                    updated = check_all_pending_outcomes()
+                    if updated:
+                        print(f"📊 Outcome checker: {len(updated)} trades resolved")
+            except Exception as e:
+                print(f"⚠️  Outcome checker error: {e}")
+            
+            time.sleep(interval_seconds)
+    
+    thread = threading.Thread(target=checker_loop, daemon=True)
+    thread.start()
+    print(f"⏰ Outcome checker started (every {interval_seconds}s)")
+

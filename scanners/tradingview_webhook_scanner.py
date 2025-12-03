@@ -35,7 +35,7 @@ from database import (
     save_candle as db_save_candle, save_candles_batch, load_candles,
     load_all_candles, get_candle_counts, clear_old_candles
 )
-from outcome_tracker import start_tracking, resume_pending_tracking, get_tracking_status, set_candle_storage
+from outcome_tracker import start_tracking, resume_pending_tracking, get_tracking_status, set_candle_storage, check_all_pending_outcomes, start_outcome_checker
 from apex_rules import (
     get_apex_status, update_apex_config, reset_apex_state,
     record_trade_result, should_block_trading, check_all_rules
@@ -1138,6 +1138,50 @@ def debug_signals():
     })
 
 
+@app.route('/api/check-outcomes', methods=['POST', 'GET'])
+def api_check_outcomes():
+    """Manually trigger outcome check for all pending trades"""
+    try:
+        from database import get_pending_signals
+        from outcome_tracker import get_current_price, normalize_ticker
+        
+        pending = get_pending_signals()
+        
+        # Run the check
+        updated = check_all_pending_outcomes()
+        
+        # Get debug info for remaining pending
+        debug_info = []
+        remaining_pending = get_pending_signals()
+        for signal in remaining_pending[:10]:  # Limit to 10 for response
+            ticker = signal['ticker']
+            base_ticker = normalize_ticker(ticker)
+            current_price = get_current_price(ticker)
+            
+            debug_info.append({
+                'id': signal['id'],
+                'ticker': ticker,
+                'normalized': base_ticker,
+                'direction': signal['direction'],
+                'entry': signal['entry_price'],
+                'stop': signal['stop_price'],
+                'target': signal['target_price'],
+                'current_price': current_price,
+                'price_available': current_price is not None
+            })
+        
+        return jsonify({
+            "status": "success",
+            "checked": len(pending),
+            "updated": len(updated),
+            "updates": updated,
+            "remaining_pending": len(remaining_pending),
+            "debug": debug_info
+        })
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
 @app.route('/api/clear-database', methods=['POST'])
 def clear_database():
     """Clear all signals and start fresh"""
@@ -2080,11 +2124,11 @@ if __name__ == '__main__':
     print(f"Momentum Check: {REQUIRE_MOMENTUM_ALIGNMENT}")
     print("="*60)
     
-    # Initialize database and resume tracking
+    # Initialize database and start outcome checker
     print("\n📦 Initializing trade journal database...")
     init_database()
-    print("📍 Resuming tracking for pending signals...")
-    resume_pending_tracking()
+    print("⏰ Starting reliable outcome checker (every 30s)...")
+    start_outcome_checker(interval_seconds=30)  # More reliable than individual threads
     
     # Use PORT env var for cloud deployment, default to 5055 for local
     port = int(os.environ.get("PORT", 5055))
