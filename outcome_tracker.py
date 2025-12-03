@@ -2,15 +2,16 @@
 Outcome Tracker
 Monitors price to determine if signals hit TP (win) or SL (loss)
 Integrates with Apex Trader Funding rules for P&L tracking
+
+Uses candle data from webhooks (preferred) or yfinance as fallback
 """
 
 import threading
 import time
-import yfinance as yf
 from datetime import datetime, timedelta
 
 # Import database functions
-from database import get_pending_signals, update_signal_outcome
+from database import get_pending_signals, update_signal_outcome, load_candles
 
 # Import Apex rules for trade result tracking
 try:
@@ -24,18 +25,52 @@ except ImportError:
 tracking_active = True
 tracked_signals = {}
 
+# Reference to candle storage (will be set by scanner)
+candle_storage = None
+
+
+def set_candle_storage(storage):
+    """Set reference to candle storage from main scanner"""
+    global candle_storage
+    candle_storage = storage
+
 
 def get_current_price(ticker):
-    """Fetch current price for a ticker"""
+    """
+    Get current price for a ticker
+    Priority: 1) Live candle storage, 2) Database candles, 3) yfinance fallback
+    """
+    # Normalize ticker
+    base_ticker = ticker.replace('=F', '').upper()
+    if ':' in base_ticker:
+        base_ticker = base_ticker.split(':')[-1]
+    
+    # Try 1: Get from live candle storage (most recent)
+    if candle_storage:
+        try:
+            candles_1m = candle_storage.get('1m', {}).get(base_ticker, [])
+            if candles_1m and len(candles_1m) > 0:
+                return float(candles_1m[-1].get('close', 0))
+        except Exception:
+            pass
+    
+    # Try 2: Get from database
     try:
-        # Convert ticker format if needed
-        yf_ticker = ticker if '=' in ticker else f"{ticker}=F"
-        
+        candles = load_candles(base_ticker, '1m', limit=1)
+        if candles and len(candles) > 0:
+            return float(candles[-1].get('close', 0))
+    except Exception:
+        pass
+    
+    # Try 3: yfinance fallback (may fail due to SSL issues)
+    try:
+        import yfinance as yf
+        yf_ticker = f"{base_ticker}=F"
         data = yf.download(yf_ticker, period='1d', interval='1m', progress=False)
         if not data.empty:
             return float(data['Close'].iloc[-1])
     except Exception as e:
-        print(f"⚠️  Error fetching price for {ticker}: {e}")
+        pass
     
     return None
 
@@ -58,22 +93,25 @@ def check_signal_outcome(signal):
     if current_price is None:
         return None, None, None
     
+    # Normalize direction to lowercase for comparison
+    direction_lower = direction.lower() if direction else ''
+    
     # Check if target or stop hit
-    if direction == 'long':
+    if direction_lower == 'long':
         if current_price >= target:
             pnl = target - entry
-            return 'win', current_price, pnl
+            return 'WIN', current_price, pnl
         elif current_price <= stop:
             pnl = stop - entry  # Negative
-            return 'loss', current_price, pnl
+            return 'LOSS', current_price, pnl
     
-    elif direction == 'short':
+    elif direction_lower == 'short':
         if current_price <= target:
             pnl = entry - target
-            return 'win', current_price, pnl
+            return 'WIN', current_price, pnl
         elif current_price >= stop:
             pnl = entry - stop  # Negative
-            return 'loss', current_price, pnl
+            return 'LOSS', current_price, pnl
     
     return None, None, None
 
@@ -97,7 +135,7 @@ def track_signal(signal_id, signal_data, max_duration_hours=24):
             # Check if expired
             if datetime.now() - start_time > max_duration:
                 print(f"⏰ Signal #{signal_id} expired (no TP/SL hit in {max_duration_hours}h)")
-                update_signal_outcome(signal_id, 'expired', None, 0)
+                update_signal_outcome(signal_id, 'DISCARDED', None, 0)  # Use DISCARDED for expired
                 break
             
             # Build signal dict for checking
@@ -112,8 +150,8 @@ def track_signal(signal_id, signal_data, max_duration_hours=24):
             outcome, price, pnl = check_signal_outcome(signal)
             
             if outcome:
-                emoji = '✅' if outcome == 'win' else '❌'
-                print(f"{emoji} Signal #{signal_id} {outcome.upper()}: {ticker} @ {price:.2f} (P&L: {pnl:+.2f})")
+                emoji = '✅' if outcome == 'WIN' else '❌'
+                print(f"{emoji} Signal #{signal_id} {outcome}: {ticker} @ {price:.2f} (P&L: {pnl:+.2f})")
                 update_signal_outcome(signal_id, outcome, price, pnl)
                 
                 # Update Apex rules tracking

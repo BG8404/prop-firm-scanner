@@ -35,7 +35,7 @@ from database import (
     save_candle as db_save_candle, save_candles_batch, load_candles,
     load_all_candles, get_candle_counts, clear_old_candles
 )
-from outcome_tracker import start_tracking, resume_pending_tracking, get_tracking_status
+from outcome_tracker import start_tracking, resume_pending_tracking, get_tracking_status, set_candle_storage
 from apex_rules import (
     get_apex_status, update_apex_config, reset_apex_state,
     record_trade_result, should_block_trading, check_all_rules
@@ -184,6 +184,9 @@ for ticker in ["MNQ", "MES", "MGC"]:
 
 # Load history from previous session
 load_candle_history()
+
+# Pass candle storage to outcome tracker for price lookups
+set_candle_storage(candle_storage)
 
 # Dashboard stats
 dashboard_stats = {
