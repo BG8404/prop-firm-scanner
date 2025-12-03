@@ -1199,6 +1199,97 @@ def api_check_outcomes():
         return jsonify({"error": str(e)}), 500
 
 
+@app.route('/api/trade/<int:trade_id>/outcome', methods=['POST'])
+def mark_trade_outcome(trade_id):
+    """Manually mark a trade as WIN or LOSS"""
+    try:
+        from database import get_connection
+        data = request.get_json(force=True, silent=True) or {}
+        outcome = data.get('outcome', '').upper()
+        
+        if outcome not in ['WIN', 'LOSS']:
+            return jsonify({"error": "Outcome must be WIN or LOSS"}), 400
+        
+        conn = get_connection()
+        cursor = conn.cursor()
+        
+        # Get the trade to calculate P&L
+        cursor.execute('SELECT entry_price, stop_price, target_price, direction FROM signal_recommendations WHERE id = ?', (trade_id,))
+        trade = cursor.fetchone()
+        
+        if not trade:
+            conn.close()
+            return jsonify({"error": "Trade not found"}), 404
+        
+        entry = trade['entry_price'] or 0
+        stop = trade['stop_price'] or 0
+        target = trade['target_price'] or 0
+        direction = (trade['direction'] or '').upper()
+        
+        # Calculate P&L based on outcome
+        if outcome == 'WIN':
+            if direction == 'LONG':
+                pnl = target - entry
+            else:
+                pnl = entry - target
+            exit_price = target
+        else:  # LOSS
+            if direction == 'LONG':
+                pnl = stop - entry  # Negative
+            else:
+                pnl = entry - stop  # Negative
+            exit_price = stop
+        
+        # Update the trade
+        cursor.execute('''
+            UPDATE signal_recommendations 
+            SET outcome = ?, exit_price = ?, pnl_ticks = ?, exit_time = CURRENT_TIMESTAMP
+            WHERE id = ?
+        ''', (outcome, exit_price, pnl, trade_id))
+        
+        # Update strategy version stats
+        cursor.execute(f'''
+            UPDATE strategy_versions 
+            SET {outcome.lower()}s = {outcome.lower()}s + 1,
+                win_rate = CASE WHEN (wins + losses) > 0 
+                           THEN ROUND(100.0 * wins / (wins + losses), 1) 
+                           ELSE NULL END
+            WHERE is_active = 1
+        ''')
+        
+        conn.commit()
+        conn.close()
+        
+        add_log(f"Trade #{trade_id} marked as {outcome} (P&L: {pnl:+.2f})", "success" if outcome == 'WIN' else "warning")
+        return jsonify({"status": "success", "outcome": outcome, "pnl": pnl})
+        
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/trade/<int:trade_id>', methods=['DELETE'])
+def delete_trade(trade_id):
+    """Delete a trade (user didn't take it)"""
+    try:
+        from database import get_connection
+        
+        conn = get_connection()
+        cursor = conn.cursor()
+        
+        # Delete the trade and its features
+        cursor.execute('DELETE FROM signal_features WHERE signal_id = ?', (trade_id,))
+        cursor.execute('DELETE FROM signal_recommendations WHERE id = ?', (trade_id,))
+        
+        conn.commit()
+        conn.close()
+        
+        add_log(f"Trade #{trade_id} deleted", "info")
+        return jsonify({"status": "success", "message": f"Trade #{trade_id} deleted"})
+        
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
 @app.route('/api/clear-database', methods=['POST'])
 def clear_database():
     """Clear all signals and start fresh"""

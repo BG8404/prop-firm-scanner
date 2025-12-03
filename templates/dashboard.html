@@ -136,17 +136,14 @@
                 <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px;">
                     <div>
                         <span style="font-weight: 600; font-size: 1.1em;">⚡ Quick Actions</span>
-                        <p style="margin: 4px 0 0 0; opacity: 0.7; font-size: 0.85em;">Manual controls</p>
+                        <p style="margin: 4px 0 0 0; opacity: 0.7; font-size: 0.85em;">Run analysis or clear data</p>
                     </div>
                     <div style="display: flex; gap: 12px; flex-wrap: wrap;">
                         <button class="btn btn-primary" onclick="analyzeNow()" id="analyzeBtn" style="background: linear-gradient(135deg, #00ff88, #00d4ff); color: #0a0f1a; font-weight: 600;">
                             🔍 Analyze Now
                         </button>
-                        <button class="btn btn-primary" onclick="checkOutcomes()" id="checkOutcomesBtn" style="background: linear-gradient(135deg, #aa66ff, #4488ff); color: #fff; font-weight: 600;">
-                            📊 Check Outcomes
-                        </button>
                         <button class="btn btn-outline" onclick="clearAllData()" style="border-color: #ff4466; color: #ff4466;">
-                            🗑️ Clear Data
+                            🗑️ Clear All
                         </button>
                     </div>
                 </div>
@@ -192,11 +189,11 @@
             <table class="signals-table">
                 <thead>
                     <tr>
-                            <th>Time</th><th>Ticker</th><th>Direction</th><th>Conf</th><th>Entry</th><th>Stop</th><th>Target</th><th>Live</th><th>Outcome</th><th>P&L</th>
+                            <th>Time</th><th>Ticker</th><th>Direction</th><th>Conf</th><th>Entry</th><th>Stop</th><th>Target</th><th>Status</th><th>Actions</th>
                     </tr>
                 </thead>
                 <tbody id="tradeJournalBody">
-                        <tr><td colspan="10"><div class="empty-state"><div class="empty-state-icon">📔</div><div class="empty-state-text">No trades logged yet</div></div></td></tr>
+                        <tr><td colspan="9"><div class="empty-state"><div class="empty-state-icon">📔</div><div class="empty-state-text">No trades logged yet</div></div></td></tr>
                 </tbody>
             </table>
         </div>

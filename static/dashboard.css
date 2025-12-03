@@ -561,6 +561,27 @@ main {
 }
 .btn-outline:hover { border-color: var(--text-secondary); color: var(--text-primary); }
 
+/* Trade Action Buttons */
+.action-btn {
+    width: 28px;
+    height: 28px;
+    border: none;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 14px;
+    transition: all 0.15s;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+}
+.action-btn:hover { transform: scale(1.15); }
+.win-btn { background: rgba(0, 255, 136, 0.2); }
+.win-btn:hover { background: rgba(0, 255, 136, 0.4); }
+.loss-btn { background: rgba(255, 68, 102, 0.2); }
+.loss-btn:hover { background: rgba(255, 68, 102, 0.4); }
+.del-btn { background: rgba(136, 136, 160, 0.2); }
+.del-btn:hover { background: rgba(136, 136, 160, 0.4); }
+
 /* Settings Panel */
 .settings-section {
     background: var(--bg-card);

@@ -65,34 +65,7 @@ async function analyzeNow() {
     }
 }
 
-// Check Outcomes - manual trigger
-async function checkOutcomes() {
-    const btn = document.getElementById('checkOutcomesBtn');
-    if (btn) {
-        btn.disabled = true;
-        btn.innerHTML = '⏳ Checking...';
-    }
-    
-    try {
-        addLog('📊 Checking outcomes...', 'info');
-        const response = await fetch('/api/check-outcomes');
-        const data = await response.json();
-        
-        if (data.updated > 0) {
-            addLog(`✅ ${data.updated} trades resolved!`, 'success');
-            loadTrades(); // Refresh the trade journal
-        } else {
-            addLog(`📊 Checked ${data.checked} trades - no changes`, 'info');
-        }
-    } catch (error) {
-        addLog('❌ Check failed: ' + error.message, 'error');
-    } finally {
-        if (btn) {
-            btn.disabled = false;
-            btn.innerHTML = '📊 Check Outcomes';
-        }
-    }
-}
+// Outcome tracking is now manual - use WIN/LOSS buttons in Trade Journal
 
 // Time update
 function updateTime() {
@@ -426,10 +399,63 @@ function getTradeRowHTML(trade) {
         <td><span class="price-value">${trade.entry_price?.toFixed(2) || '--'}</span></td>
         <td><span class="price-value">${trade.stop_price?.toFixed(2) || '--'}</span></td>
         <td><span class="price-value">${trade.target_price?.toFixed(2) || '--'}</span></td>
-        <td>${liveIndicator}</td>
         <td><span class="status-badge ${outcomeClass}">${outcomeText}</span></td>
-        <td><span class="price-value" style="color: var(--accent-${pnlClass})">${pnl}</span></td>
+        <td>${getTradeActions(trade)}</td>
     `;
+}
+
+function getTradeActions(trade) {
+    const isPending = trade.outcome === 'PENDING' || trade.outcome === 'pending';
+    
+    if (isPending) {
+        return `
+            <div style="display: flex; gap: 4px; justify-content: center;">
+                <button onclick="markTrade(${trade.id}, 'WIN')" class="action-btn win-btn" title="Mark as WIN">✅</button>
+                <button onclick="markTrade(${trade.id}, 'LOSS')" class="action-btn loss-btn" title="Mark as LOSS">❌</button>
+                <button onclick="deleteTrade(${trade.id})" class="action-btn del-btn" title="Delete (didn't take)">🗑️</button>
+            </div>
+        `;
+    } else {
+        return `<span style="color: #666; font-size: 0.8em;">--</span>`;
+    }
+}
+
+async function markTrade(tradeId, outcome) {
+    try {
+        const response = await fetch(\`/api/trade/\${tradeId}/outcome\`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ outcome: outcome })
+        });
+        
+        if (response.ok) {
+            addLog(\`Trade #\${tradeId} marked as \${outcome}\`, outcome === 'WIN' ? 'success' : 'error');
+            loadTrades(); // Refresh
+        } else {
+            addLog(\`Failed to update trade #\${tradeId}\`, 'error');
+        }
+    } catch (error) {
+        addLog(\`Error: \${error.message}\`, 'error');
+    }
+}
+
+async function deleteTrade(tradeId) {
+    if (!confirm('Delete this trade? (You didn\\'t take it)')) return;
+    
+    try {
+        const response = await fetch(\`/api/trade/\${tradeId}\`, {
+            method: 'DELETE'
+        });
+        
+        if (response.ok) {
+            addLog(\`Trade #\${tradeId} deleted\`, 'info');
+            loadTrades(); // Refresh
+        } else {
+            addLog(\`Failed to delete trade #\${tradeId}\`, 'error');
+        }
+    } catch (error) {
+        addLog(\`Error: \${error.message}\`, 'error');
+    }
 }
 
 // Apex Rules
