@@ -494,20 +494,31 @@ class MTFAnalyzer:
         result['direction'] = bias
         result['confidence'] = round(min(100, max(0, total_confidence)))
         result['signal_type'] = bias if result['confidence'] >= 60 else 'NO_TRADE'
+        result['entry_type'] = 'MTF_CONFLUENCE'
         
-        # Generate entry/stop/target if not provided
-        if not entry and candles_1m:
+        # Always generate entry/stop/target from candle data
+        if candles_1m:
             last_candle = candles_1m[-1]
-            result['suggested_entry'] = last_candle.get('close', 0)
+            current_price = last_candle.get('close', 0)
+            result['current_price'] = current_price
+            result['entry'] = current_price
             
-            # ATR-based stop/target
+            # ATR-based stop/target (or use provided values)
             atr = self._calculate_atr(candles_5m)
+            if atr < 1:
+                atr = 5  # Minimum ATR fallback
+            
             if bias == 'LONG':
-                result['suggested_stop'] = result['suggested_entry'] - (atr * 1.5)
-                result['suggested_target'] = result['suggested_entry'] + (atr * 3)
-            else:
-                result['suggested_stop'] = result['suggested_entry'] + (atr * 1.5)
-                result['suggested_target'] = result['suggested_entry'] - (atr * 3)
+                result['stop'] = stop if stop else round(current_price - (atr * 1.5), 2)
+                result['target'] = target if target else round(current_price + (atr * 3), 2)
+            else:  # SHORT
+                result['stop'] = stop if stop else round(current_price + (atr * 1.5), 2)
+                result['target'] = target if target else round(current_price - (atr * 3), 2)
+            
+            # Calculate actual R:R
+            risk = abs(result['entry'] - result['stop'])
+            reward = abs(result['target'] - result['entry'])
+            result['risk_reward'] = round(reward / risk, 2) if risk > 0 else 0
         
         return result
     

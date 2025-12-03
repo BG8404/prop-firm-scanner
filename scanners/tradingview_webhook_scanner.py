@@ -1538,17 +1538,25 @@ def webhook():
                 print(f"   Entry Type: {mtf_result.get('entry_type')}")
             
             # Convert MTF result to signal format
+            entry_price = mtf_result.get('entry') or mtf_result.get('suggested_entry')
+            stop_price = mtf_result.get('stop') or mtf_result.get('suggested_stop')
+            target_price = mtf_result.get('target') or mtf_result.get('suggested_target')
+            current_price = mtf_result.get('current_price') or entry_price
+            
             signal = {
                 'direction': direction,
                 'confidence': confidence,
-                'entry': mtf_result.get('entry'),
-                'stop': mtf_result.get('stop'),
-                'takeProfit': mtf_result.get('target'),
-                'currentPrice': mtf_result.get('current_price'),
+                'entry': entry_price,
+                'stop': stop_price,
+                'takeProfit': target_price,
+                'currentPrice': current_price,
                 'entryType': mtf_result.get('entry_type', 'MTF_CONFLUENCE'),
                 'rationale': mtf_result.get('rationale', ''),
                 'recentMomentum': 'bullish' if direction == 'long' else 'bearish' if direction == 'short' else 'neutral'
             }
+            
+            # Debug log
+            print(f"   Entry: {entry_price}, Stop: {stop_price}, Target: {target_price}")
             
             # Store signal for dashboard
             signal_entry = {
