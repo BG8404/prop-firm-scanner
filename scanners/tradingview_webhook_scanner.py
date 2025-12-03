@@ -240,6 +240,16 @@ def save_candle_history():
     except Exception as e:
         print(f"⚠️  Error saving candle history: {e}")
 
+def normalize_ticker(ticker):
+    """Normalize ticker symbol - strip contract months like Z2025, G2026, etc."""
+    import re
+    # Remove contract month/year suffixes like Z2025, G2026, H2025, etc.
+    base = re.sub(r'[FGHJKMNQUVXZ]\d{4}$', '', ticker)
+    # Also remove =F suffix
+    base = base.replace('=F', '')
+    return base.upper()
+
+
 def load_candle_history():
     """Load candle history from DATABASE on startup"""
     global candle_storage
@@ -255,11 +265,22 @@ def load_candle_history():
         total_loaded = 0
         
         for ticker, timeframes in db_candles.items():
+            # Normalize the ticker (MNQZ2025 -> MNQ)
+            base_ticker = normalize_ticker(ticker)
+            
             for tf in ["1m", "5m", "15m"]:
                 candles = timeframes.get(tf, [])
                 if candles:
                     maxlen = 100 if tf == "1m" else 50 if tf == "5m" else 30
-                    candle_storage[tf][ticker] = deque(candles, maxlen=maxlen)
+                    
+                    # Merge with existing if base ticker already has candles
+                    if base_ticker in candle_storage[tf]:
+                        existing = list(candle_storage[tf][base_ticker])
+                        combined = existing + candles
+                        candle_storage[tf][base_ticker] = deque(combined[-maxlen:], maxlen=maxlen)
+                    else:
+                        candle_storage[tf][base_ticker] = deque(candles, maxlen=maxlen)
+                    
                     total_loaded += len(candles)
         
         if total_loaded > 0:
@@ -377,9 +398,9 @@ def get_max_ticks(ticker):
 
 def store_candle(ticker, timeframe, candle_data):
     """Store candle in memory AND database"""
+    # Normalize ticker (MNQZ2025 -> MNQ, CBOT:MES=F -> MES)
     base_ticker = ticker.split(":")[0] if ":" in ticker else ticker
-    # Also remove =F suffix for consistency
-    base_ticker = base_ticker.replace('=F', '')
+    base_ticker = normalize_ticker(base_ticker)
     
     # Ensure ticker exists in storage
     if base_ticker not in candle_storage[timeframe]:
