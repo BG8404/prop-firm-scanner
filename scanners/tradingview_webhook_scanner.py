@@ -19,6 +19,17 @@ import webbrowser
 import threading
 import time
 
+# EST timezone helper
+def est_now():
+    """Get current time in EST (UTC-5)"""
+    utc_now = dt.datetime.utcnow()
+    est_offset = dt.timedelta(hours=-5)
+    return utc_now + est_offset
+
+def est_time_str(fmt="%H:%M:%S"):
+    """Get EST time as formatted string"""
+    return est_now().strftime(fmt)
+
 # Auto ngrok tunnel
 try:
     from pyngrok import ngrok
@@ -151,20 +162,15 @@ def send_discord_alert(ticker, signal, analysis_details=None):
         if rationale:
             embed["description"] = rationale[:500]  # Limit length
         
-        # Add analysis breakdown if available
+        # Add entry instructions if available
         if analysis_details:
-            components = analysis_details.get('components', {})
-            if components:
-                breakdown = []
-                for name, data in components.items():
-                    score = data.get('score', '?')
-                    breakdown.append(f"• {name.title()}: {score}%")
-                if breakdown:
-                    embed["fields"].append({
-                        "name": "📋 Analysis Breakdown",
-                        "value": "\n".join(breakdown),
-                        "inline": False
-                    })
+            entry_instruction = analysis_details.get('entry_instruction', '')
+            if entry_instruction:
+                embed["fields"].append({
+                    "name": "📝 Entry Instructions",
+                    "value": entry_instruction[:500],
+                    "inline": False
+                })
         
         # Send to Discord
         payload = {
@@ -978,7 +984,7 @@ def analyze_mobile(ticker_symbol=None):
     </head>
     <body>
         <h1>🕷️ SignalCrawler</h1>
-        <div class="time">Analyzed: {dt.datetime.now().strftime("%I:%M:%S %p")}</div>
+        <div class="time">Analyzed: {est_time_str("%I:%M:%S %p")} EST</div>
     '''
     
     for r in results:
@@ -1047,6 +1053,16 @@ def analyze_mobile(ticker_symbol=None):
             
             for w in warnings[:2]:
                 html += f'<div class="warning">⚠️ {w}</div>'
+            
+            # Add entry instructions
+            entry_instruction = r.get('entry_instruction', '')
+            if entry_instruction and direction in ('LONG', 'SHORT'):
+                html += f'''
+                <div style="background:#1a2a1a;border:1px solid #2a4a2a;padding:12px;border-radius:8px;margin-top:12px;">
+                    <div style="font-weight:bold;color:#00ff88;margin-bottom:8px;">📝 Entry Instructions</div>
+                    <div style="font-size:0.9rem;white-space:pre-line;color:#aaffaa;">{entry_instruction}</div>
+                </div>
+                '''
         else:
             html += f'<div style="color:#888;margin-top:8px;">{message}</div>'
         
@@ -1101,7 +1117,8 @@ def run_analysis(ticker_symbol=None, send_alerts=False):
                 "target": mtf_result.get('target'),
                 "risk_reward": mtf_result.get('risk_reward'),
                 "warnings": mtf_result.get('warnings', []),
-                "stay_away_reason": mtf_result.get('stay_away_reason')
+                "stay_away_reason": mtf_result.get('stay_away_reason'),
+                "entry_instruction": mtf_result.get('entry_instruction', '')
             }
             results.append(result)
             
@@ -1969,7 +1986,7 @@ def webhook():
             
             # Store signal for dashboard
             signal_entry = {
-                "time": dt.datetime.now().strftime("%H:%M:%S"),
+                "time": est_time_str("%H:%M:%S"),
                 "ticker": ticker,
                 "direction": direction,
                 "confidence": confidence,

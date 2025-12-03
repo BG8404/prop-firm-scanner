@@ -96,13 +96,13 @@ async function checkOutcomes() {
 
 // Time update
 function updateTime() {
-    document.getElementById('currentTime').textContent = new Date().toLocaleTimeString('en-US', { hour12: false });
+    document.getElementById('currentTime').textContent = new Date().toLocaleTimeString('en-US', { hour12: false, timeZone: 'America/New_York' }) + ' EST';
 }
 
 // Logging
 function addLog(message, type = 'info') {
     const feed = document.getElementById('liveFeed');
-    const time = new Date().toLocaleTimeString('en-US', { hour12: false });
+    const time = new Date().toLocaleTimeString('en-US', { hour12: false, timeZone: 'America/New_York' });
     const entry = document.createElement('div');
     entry.className = `log-entry ${type}`;
     entry.innerHTML = `<span class="log-time">${time}</span><span class="log-message">${message}</span>`;

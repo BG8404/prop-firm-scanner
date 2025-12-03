@@ -519,6 +519,46 @@ class MTFAnalyzer:
             risk = abs(result['entry'] - result['stop'])
             reward = abs(result['target'] - result['entry'])
             result['risk_reward'] = round(reward / risk, 2) if risk > 0 else 0
+            
+            # ========== ENTRY INSTRUCTIONS ==========
+            # Based on strength, alignment, and momentum
+            tf1_strength = result['components'].get('timeframe', {}).get('tf1', {}).get('strength', 'weak')
+            tf5_strength = result['components'].get('timeframe', {}).get('tf5', {}).get('strength', 'weak')
+            volume_confirming = result['components'].get('volume', {}).get('is_confirming', False)
+            
+            instructions = []
+            
+            # Entry timing based on momentum
+            if tf1_strength == 'strong' and tf5_strength in ['strong', 'moderate']:
+                if volume_confirming:
+                    instructions.append("🚀 STRONG MOMENTUM - Market order OK")
+                else:
+                    instructions.append("⚡ Good momentum - Enter on next candle close")
+            elif alignment == 'full':
+                instructions.append("⏳ WAIT FOR PULLBACK to entry level")
+                if bias == 'LONG':
+                    pullback_target = round(current_price - (atr * 0.5), 2)
+                    instructions.append(f"   Look for pullback toward {pullback_target}")
+                else:
+                    pullback_target = round(current_price + (atr * 0.5), 2)
+                    instructions.append(f"   Look for pullback toward {pullback_target}")
+            else:  # conditional alignment
+                instructions.append("⚠️ WAIT FOR CONFIRMATION")
+                instructions.append("   Need diverging timeframe to align first")
+            
+            # Stop management
+            if result['confidence'] >= 80:
+                instructions.append("📍 Move stop to breakeven at +1R")
+            else:
+                instructions.append("📍 Give trade room - don't move stop early")
+            
+            # Target management
+            if volume_confirming and alignment == 'full':
+                instructions.append("🎯 Can trail stop for runners")
+            else:
+                instructions.append("🎯 Take profit at target - don't get greedy")
+            
+            result['entry_instruction'] = "\n".join(instructions)
         
         return result
     
