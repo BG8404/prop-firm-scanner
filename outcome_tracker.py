@@ -35,15 +35,24 @@ def set_candle_storage(storage):
     candle_storage = storage
 
 
+def normalize_ticker(ticker):
+    """Normalize ticker symbol - strip contract months like Z2025, G2026, etc."""
+    import re
+    base = ticker.replace('=F', '').upper()
+    if ':' in base:
+        base = base.split(':')[-1]
+    # Remove contract month/year suffixes like Z2025, G2026, H2025, etc.
+    base = re.sub(r'[FGHJKMNQUVXZ]\d{4}$', '', base)
+    return base
+
+
 def get_current_price(ticker):
     """
     Get current price for a ticker
     Priority: 1) Live candle storage, 2) Database candles, 3) yfinance fallback
     """
-    # Normalize ticker
-    base_ticker = ticker.replace('=F', '').upper()
-    if ':' in base_ticker:
-        base_ticker = base_ticker.split(':')[-1]
+    # Normalize ticker (MNQZ2025 -> MNQ)
+    base_ticker = normalize_ticker(ticker)
     
     # Try 1: Get from live candle storage (most recent)
     if candle_storage:
