@@ -821,6 +821,20 @@ def get_trades():
 
 # ========= TICKER API (Hardcoded: MNQ, MES, MGC) =========
 
+@app.route('/api/debug-signals', methods=['GET'])
+def debug_signals():
+    """Debug endpoint to see signal processing details"""
+    recent = list(dashboard_stats.get("recent_signals", []))[:10]
+    return jsonify({
+        "recent_signals": recent,
+        "webhook_count": dashboard_stats.get("webhook_count", 0),
+        "signal_count": dashboard_stats.get("signal_count", 0),
+        "min_confidence": MIN_CONFIDENCE,
+        "min_risk_reward": MIN_RISK_REWARD,
+        "discord_configured": bool(DISCORD_WEBHOOK_URL)
+    })
+
+
 @app.route('/api/clear-database', methods=['POST'])
 def clear_database():
     """Clear all signals and start fresh"""
@@ -1642,6 +1656,18 @@ def webhook():
                 else:
                     print(f"\n⛔ SIGNAL REJECTED")
                     add_log(f"⛔ Rejected: {ticker} {direction.upper()} {confidence}%", "warning")
+                    
+                    # Send Discord notification for high-confidence rejections so user knows
+                    if confidence >= 70:
+                        rejection_signal = {
+                            'direction': 'REJECTED',
+                            'confidence': confidence,
+                            'entry': signal.get('entry'),
+                            'stop': signal.get('stop'),
+                            'takeProfit': signal.get('takeProfit'),
+                            'rationale': f"❌ REJECTED: {', '.join(reasons)}"
+                        }
+                        send_discord_alert(f"{ticker} (REJECTED)", rejection_signal, mtf_result)
                     # Rejected signals NOT saved to Trade Journal - only shown in Recent Signals
             else:
                 print(f"   No trade recommended")
