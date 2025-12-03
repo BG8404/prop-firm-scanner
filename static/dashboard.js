@@ -29,87 +29,68 @@ function switchTab(tabName) {
     }
 }
 
-// Settings management
-function toggleSettings() {
-    const content = document.getElementById('settingsContent');
-    const toggle = document.getElementById('settingsToggle');
-    content.classList.toggle('hidden');
-    toggle.classList.toggle('collapsed');
+// Settings removed for simplicity - values are hardcoded
+// Min Confidence: 70%, Min R:R: 1.5:1, Analysis: 5 min, Tickers: MNQ, MES, MGC
+
+function loadSettings() {
+    currentTickers = ['MNQ', 'MES', 'MGC'];
 }
 
-
-function addTicker(event) {
-    if (event.key === 'Enter') {
-        const input = document.getElementById('tickersInput');
-        const ticker = input.value.trim().toUpperCase();
-        if (ticker && !currentTickers.includes(ticker)) {
-            currentTickers.push(ticker);
-            renderTickers();
-        }
-        input.value = '';
+// Analyze Now - trigger on-demand analysis
+async function analyzeNow() {
+    const btn = document.getElementById('analyzeBtn');
+    if (btn) {
+        btn.disabled = true;
+        btn.innerHTML = '⏳ Analyzing...';
     }
-}
-
-function removeTicker(ticker) {
-    currentTickers = currentTickers.filter(t => t !== ticker);
-    renderTickers();
-}
-
-function renderTickers() {
-    const container = document.getElementById('tickerTags');
-    container.innerHTML = currentTickers.map(ticker => 
-        `<span class="ticker-tag">${ticker} <span class="remove" onclick="removeTicker('${ticker}')">×</span></span>`
-    ).join('');
-}
-
-async function saveSettings() {
-    const settings = {
-        scan_interval: parseInt(document.getElementById('scanInterval').value),
-        min_confidence: parseInt(document.getElementById('minConfidence').value),
-        min_risk_reward: parseFloat(document.getElementById('minRiskReward').value),
-        tickers: currentTickers
-    };
-
+    
     try {
-        const response = await fetch('/api/settings', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(settings)
-        });
-
-        if (response.ok) {
-            addLog('Settings saved successfully', 'success');
-        } else {
-            addLog('Failed to save settings', 'error');
-        }
-    } catch (error) {
-        addLog('Error saving settings: ' + error.message, 'error');
-    }
-}
-
-function resetSettings() {
-    document.getElementById('scanInterval').value = '2';
-    document.getElementById('minConfidence').value = '80';
-    document.getElementById('minRiskReward').value = '2.0';
-    currentTickers = ['MNQ=F', 'MES=F', 'MGC=F'];
-    renderTickers();
-    addLog('Settings reset to defaults', 'info');
-}
-
-async function loadSettings() {
-    try {
-        const response = await fetch('/api/settings');
-        const settings = await response.json();
+        addLog('🔍 Running analysis...', 'info');
+        const response = await fetch('/analyze');
         
-        if (settings.scan_interval) document.getElementById('scanInterval').value = settings.scan_interval;
-        if (settings.min_confidence) document.getElementById('minConfidence').value = settings.min_confidence;
-        if (settings.min_risk_reward) document.getElementById('minRiskReward').value = settings.min_risk_reward;
-        if (settings.tickers) {
-            currentTickers = settings.tickers;
-            renderTickers();
+        if (response.ok) {
+            // Open results in new tab or show notification
+            window.open('/analyze', '_blank');
+            addLog('✅ Analysis complete - check new tab', 'success');
+        } else {
+            addLog('❌ Analysis failed', 'error');
         }
     } catch (error) {
-        console.log('Using default settings');
+        addLog('❌ Analysis error: ' + error.message, 'error');
+    } finally {
+        if (btn) {
+            btn.disabled = false;
+            btn.innerHTML = '🔍 Analyze Now';
+        }
+    }
+}
+
+// Check Outcomes - manual trigger
+async function checkOutcomes() {
+    const btn = document.getElementById('checkOutcomesBtn');
+    if (btn) {
+        btn.disabled = true;
+        btn.innerHTML = '⏳ Checking...';
+    }
+    
+    try {
+        addLog('📊 Checking outcomes...', 'info');
+        const response = await fetch('/api/check-outcomes');
+        const data = await response.json();
+        
+        if (data.updated > 0) {
+            addLog(`✅ ${data.updated} trades resolved!`, 'success');
+            loadTrades(); // Refresh the trade journal
+        } else {
+            addLog(`📊 Checked ${data.checked} trades - no changes`, 'info');
+        }
+    } catch (error) {
+        addLog('❌ Check failed: ' + error.message, 'error');
+    } finally {
+        if (btn) {
+            btn.disabled = false;
+            btn.innerHTML = '📊 Check Outcomes';
+        }
     }
 }
 

@@ -131,22 +131,24 @@
                 </div>
             </div>
 
-            <!-- Scan Controls -->
+            <!-- Quick Actions -->
             <div class="settings-section" style="margin-bottom: 24px; background: linear-gradient(135deg, rgba(0, 255, 136, 0.08), rgba(0, 212, 255, 0.05)); border-color: rgba(0, 255, 136, 0.3);">
                 <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px;">
                     <div>
-                        <span style="font-weight: 600; font-size: 1.1em;">🔍 Manual Scan</span>
-                        <p style="margin: 4px 0 0 0; opacity: 0.7; font-size: 0.85em;">Run MTF analysis on current candle data</p>
+                        <span style="font-weight: 600; font-size: 1.1em;">⚡ Quick Actions</span>
+                        <p style="margin: 4px 0 0 0; opacity: 0.7; font-size: 0.85em;">Manual controls</p>
                     </div>
-                    <div style="display: flex; gap: 12px;">
-                        <button class="btn btn-primary" onclick="scanAllTickers()" id="scanAllBtn" style="background: linear-gradient(135deg, #00ff88, #00d4ff); color: #0a0f1a; font-weight: 600;">
-                            🚀 Scan All Tickers
+                    <div style="display: flex; gap: 12px; flex-wrap: wrap;">
+                        <button class="btn btn-primary" onclick="analyzeNow()" id="analyzeBtn" style="background: linear-gradient(135deg, #00ff88, #00d4ff); color: #0a0f1a; font-weight: 600;">
+                            🔍 Analyze Now
+                        </button>
+                        <button class="btn btn-primary" onclick="checkOutcomes()" id="checkOutcomesBtn" style="background: linear-gradient(135deg, #aa66ff, #4488ff); color: #fff; font-weight: 600;">
+                            📊 Check Outcomes
+                        </button>
+                        <button class="btn btn-outline" onclick="clearAllData()" style="border-color: #ff4466; color: #ff4466;">
+                            🗑️ Clear Data
                         </button>
                     </div>
-                </div>
-                <div id="scanResults" style="margin-top: 16px; display: none;">
-                    <div class="scan-results-header" style="font-weight: 600; margin-bottom: 8px;">📊 Scan Results</div>
-                    <div id="scanResultsContent"></div>
                 </div>
             </div>
 
@@ -175,46 +177,6 @@
                 </div>
                 <div class="ticker-badge" style="padding: 8px 16px; background: var(--bg-secondary); border-radius: 8px;">
                     <strong>MGC</strong> <span style="opacity: 0.7;">| $1.00/tick</span>
-                </div>
-            </div>
-        </div>
-
-        <!-- Settings Panel -->
-        <div class="settings-section">
-            <div class="settings-header" onclick="toggleSettings()">
-                    <div class="settings-title"><span>⚙️</span><span>Scanner Settings</span></div>
-                <span class="settings-toggle" id="settingsToggle">▼</span>
-            </div>
-            <div class="settings-content" id="settingsContent">
-                <div class="setting-group">
-                    <label class="setting-label">Scan Interval</label>
-                    <select class="setting-select" id="scanInterval">
-                        <option value="1">1 minute</option>
-                            <option value="2" selected>2 minutes</option>
-                        <option value="5">5 minutes</option>
-                    </select>
-                </div>
-                <div class="setting-group">
-                    <label class="setting-label">Min Confidence</label>
-                    <select class="setting-select" id="minConfidence">
-                        <option value="60">60%</option>
-                            <option value="70">70%</option>
-                            <option value="80" selected>80%</option>
-                        <option value="90">90%</option>
-                    </select>
-                </div>
-                <div class="setting-group">
-                    <label class="setting-label">Min Risk:Reward</label>
-                    <select class="setting-select" id="minRiskReward">
-                        <option value="1.5">1.5:1</option>
-                            <option value="2.0" selected>2:1</option>
-                        <option value="2.5">2.5:1</option>
-                        <option value="3.0">3:1</option>
-                    </select>
-                </div>
-                    <div style="grid-column: 1 / -1; display: flex; gap: 12px; margin-top: 12px;">
-                        <button class="btn btn-success" onclick="saveSettings()">💾 Save</button>
-                        <button class="btn btn-outline" onclick="resetSettings()">↺ Reset</button>
                 </div>
             </div>
         </div>
