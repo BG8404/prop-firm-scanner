@@ -166,7 +166,7 @@ def send_discord_alert(ticker, signal, analysis_details=None):
             "embeds": [embed]
         }
         
-        response = requests.post(DISCORD_WEBHOOK_URL, json=payload, timeout=10)
+        response = http_requests.post(DISCORD_WEBHOOK_URL, json=payload, timeout=10)
         
         if response.status_code in [200, 204]:
             print(f"📱 Discord alert sent for {ticker}")
@@ -866,7 +866,7 @@ def test_discord():
             }]
         }
         
-        response = requests.post(webhook_url, json=payload, timeout=10)
+        response = http_requests.post(webhook_url, json=payload, timeout=10)
         
         if response.status_code in [200, 204]:
             return jsonify({"status": "success", "message": "Test alert sent to Discord! Check your channel."})
