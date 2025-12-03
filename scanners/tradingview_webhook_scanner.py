@@ -2127,6 +2127,28 @@ if __name__ == '__main__':
     # Initialize database and start outcome checker
     print("\n📦 Initializing trade journal database...")
     init_database()
+    
+    # Load recent signals from database (so they persist across restarts)
+    print("📊 Loading recent signals from database...")
+    try:
+        db_signals = get_recent_signals(limit=50)
+        for sig in reversed(db_signals):  # Oldest first so newest ends up at front
+            signal_entry = {
+                "ticker": sig.get('ticker', ''),
+                "direction": sig.get('direction', ''),
+                "confidence": sig.get('confidence', 0),
+                "entry": sig.get('entry_price'),
+                "stop": sig.get('stop_price'),
+                "target": sig.get('target_price'),
+                "rationale": sig.get('rationale', ''),
+                "timestamp": sig.get('timestamp', ''),
+                "outcome": sig.get('outcome', 'PENDING')
+            }
+            dashboard_stats["recent_signals"].append(signal_entry)
+        print(f"   Loaded {len(db_signals)} recent signals")
+    except Exception as e:
+        print(f"⚠️  Could not load recent signals: {e}")
+    
     print("⏰ Starting reliable outcome checker (every 30s)...")
     start_outcome_checker(interval_seconds=30)  # More reliable than individual threads
     
