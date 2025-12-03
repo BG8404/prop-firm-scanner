@@ -2021,6 +2021,7 @@ def webhook():
                         print(f"   📱 Discord skipped (conf {confidence}% < {MIN_DISCORD_CONFIDENCE}%)")
                 else:
                     print(f"\n⛔ SIGNAL REJECTED")
+                    print(f"   Rejection reasons: {reasons}")
                     add_log(f"⛔ Rejected: {ticker} {direction.upper()} {confidence}%", "warning")
                     
                     # Send Discord notification for high-confidence rejections so user knows
@@ -2028,12 +2029,17 @@ def webhook():
                         rejection_signal = {
                             'direction': 'REJECTED',
                             'confidence': confidence,
-                            'entry': signal.get('entry'),
-                            'stop': signal.get('stop'),
-                            'takeProfit': signal.get('takeProfit'),
+                            'entry': signal.get('entry') or signal.get('currentPrice'),
+                            'stop': signal.get('stop') or 0,
+                            'takeProfit': signal.get('takeProfit') or 0,
                             'rationale': f"❌ REJECTED: {', '.join(reasons)}"
                         }
-                        send_discord_alert(f"{ticker} (REJECTED)", rejection_signal, mtf_result)
+                        try:
+                            print(f"   📱 Sending rejection Discord for {ticker}...")
+                            send_discord_alert(f"{ticker} (REJECTED)", rejection_signal, mtf_result)
+                            print(f"   ✅ Rejection Discord sent!")
+                        except Exception as e:
+                            print(f"   ❌ Rejection Discord failed: {e}")
                     # Rejected signals NOT saved to Trade Journal - only shown in Recent Signals
             else:
                 print(f"   No trade recommended")
