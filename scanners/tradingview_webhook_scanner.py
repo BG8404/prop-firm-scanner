@@ -143,7 +143,7 @@ def send_discord_alert(ticker, signal, analysis_details=None):
                 {"name": "⚖️ Risk:Reward", "value": f"{rr}:1" if rr else "N/A", "inline": True},
             ],
             "footer": {"text": "SignalCrawler"},
-            "timestamp": datetime.now().isoformat()
+            "timestamp": dt.datetime.now().isoformat()
         }
         
         # Add rationale if available
@@ -896,7 +896,7 @@ def analyze_on_demand(ticker_symbol=None):
         
         return jsonify({
             "status": "success",
-            "analyzed_at": datetime.now().isoformat(),
+            "analyzed_at": dt.datetime.now().isoformat(),
             "results": results
         })
         
