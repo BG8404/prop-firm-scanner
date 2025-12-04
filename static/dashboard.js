@@ -1,4 +1,4 @@
-// Prop Firm Scanner Dashboard v2 - JavaScript
+// SignalCrawler v2.0 Dashboard - JavaScript
 
 // State
 let webhookCount = 0;
@@ -10,6 +10,7 @@ let winRateChart = null;
 let pnlChart = null;
 let apexPnlChart = null;
 let apexEquityChart = null;
+let todaySignalsCount = 0;
 
 // Tab management
 function switchTab(tabName) {
@@ -1324,6 +1325,134 @@ async function resetPromptMods() {
     }
 }
 
+// ========== v2.0 NEWS FILTER ==========
+async function loadNewsStatus() {
+    try {
+        const response = await fetch('/api/news/status');
+        const data = await response.json();
+        
+        const newsCard = document.getElementById('newsCard');
+        const newsBadge = document.getElementById('newsBadge');
+        const newsValue = document.getElementById('newsValue');
+        const newsSubtitle = document.getElementById('newsSubtitle');
+        
+        if (!newsCard) return;
+        
+        if (data.is_blackout) {
+            // Active blackout
+            newsCard.classList.add('blackout');
+            newsBadge.textContent = 'BLACKOUT';
+            newsBadge.className = 'status-badge blackout';
+            newsValue.textContent = data.current_event.event;
+            newsValue.style.color = 'var(--accent-red)';
+            newsSubtitle.textContent = 'Clear in ' + data.current_event.minutes_until_clear + ' min';
+        } else {
+            // No blackout
+            newsCard.classList.remove('blackout');
+            newsBadge.textContent = 'CLEAR';
+            newsBadge.className = 'status-badge ok';
+            
+            if (data.upcoming_events && data.upcoming_events.length > 0) {
+                const next = data.upcoming_events[0];
+                newsValue.textContent = next.event.split(' - ')[0]; // Shorten
+                newsValue.style.color = 'var(--accent-yellow)';
+                newsSubtitle.textContent = next.date + ' ' + next.time;
+            } else {
+                newsValue.textContent = 'No events';
+                newsValue.style.color = 'var(--accent-green)';
+                newsSubtitle.textContent = 'Trading clear';
+            }
+        }
+    } catch (error) {
+        console.error('Failed to load news status:', error);
+    }
+}
+
+// ========== v2.0 DAILY BIAS ==========
+async function loadDailyBias() {
+    try {
+        const response = await fetch('/api/analyze');
+        const data = await response.json();
+        
+        const biasCard = document.getElementById('biasCard');
+        const biasBadge = document.getElementById('biasBadge');
+        const biasValue = document.getElementById('biasValue');
+        const biasSubtitle = document.getElementById('biasSubtitle');
+        const levelsBadge = document.getElementById('levelsBadge');
+        const orbRange = document.getElementById('orbRange');
+        const pdhPdl = document.getElementById('pdhPdl');
+        
+        if (!biasCard || !data.results) return;
+        
+        // Use first result for bias (usually MNQ)
+        const result = data.results[0];
+        if (!result) return;
+        
+        const bias = result.daily_bias || 'UNKNOWN';
+        
+        // Update bias card
+        biasCard.classList.remove('long', 'short');
+        if (bias === 'LONG') {
+            biasCard.classList.add('long');
+            biasBadge.textContent = 'LONG';
+            biasBadge.className = 'status-badge long';
+            biasValue.textContent = '🟢 LONG';
+            biasValue.style.color = 'var(--accent-green)';
+        } else if (bias === 'SHORT') {
+            biasCard.classList.add('short');
+            biasBadge.textContent = 'SHORT';
+            biasBadge.className = 'status-badge short';
+            biasValue.textContent = '🔴 SHORT';
+            biasValue.style.color = 'var(--accent-red)';
+        } else if (bias === 'WAITING') {
+            biasBadge.textContent = 'WAITING';
+            biasBadge.className = 'status-badge warning';
+            biasValue.textContent = '⏳ ORB';
+            biasValue.style.color = 'var(--accent-yellow)';
+        } else {
+            biasBadge.textContent = 'NEUTRAL';
+            biasBadge.className = 'status-badge neutral';
+            biasValue.textContent = '⚪ NEUTRAL';
+            biasValue.style.color = 'var(--text-secondary)';
+        }
+        
+        biasSubtitle.textContent = result.bias_reason || 'Analyzing market';
+        
+        // Update levels card
+        if (result.orb_high && result.orb_low) {
+            orbRange.textContent = result.orb_low.toFixed(0) + ' - ' + result.orb_high.toFixed(0);
+            levelsBadge.textContent = 'ACTIVE';
+            levelsBadge.className = 'status-badge ok';
+        } else {
+            orbRange.textContent = 'Building...';
+            levelsBadge.textContent = 'BUILDING';
+            levelsBadge.className = 'status-badge warning';
+        }
+        
+        if (result.pdh && result.pdl) {
+            pdhPdl.textContent = result.pdh.toFixed(0) + ' / ' + result.pdl.toFixed(0);
+        } else {
+            pdhPdl.textContent = '-- / --';
+        }
+        
+        // Count today's valid signals
+        let todayCount = 0;
+        for (const r of data.results) {
+            if (r.all_criteria_met) todayCount++;
+        }
+        
+        const todayBadge = document.getElementById('todaySignalsBadge');
+        const todayValue = document.getElementById('todaySignalsValue');
+        if (todayBadge && todayValue) {
+            todayBadge.textContent = todayCount;
+            todayValue.textContent = todayCount;
+        }
+        
+    } catch (error) {
+        console.error('Failed to load daily bias:', error);
+    }
+}
+
 // Initialize
 document.addEventListener('DOMContentLoaded', () => {
     updateTime();
@@ -1344,6 +1473,10 @@ document.addEventListener('DOMContentLoaded', () => {
     fetchCandleStatus();
     loadMarketRegime();
     
+    // v2.0 additions
+    loadNewsStatus();
+    loadDailyBias();
+    
     setInterval(fetchStatus, 2000);
     setInterval(fetchPerformance, 5000);
     setInterval(fetchTradeJournal, 3000);
@@ -1351,8 +1484,12 @@ document.addEventListener('DOMContentLoaded', () => {
     setInterval(fetchCandleStatus, 5000);
     setInterval(loadMarketRegime, 30000);  // Update market regime every 30s
     
-    addLog('Dashboard v2 initialized', 'success');
-    addLog('Apex rules tracking enabled', 'info');
-    addLog('Market regime detection active', 'info');
+    // v2.0 intervals
+    setInterval(loadNewsStatus, 30000);    // Check news every 30s
+    setInterval(loadDailyBias, 60000);     // Update bias every 60s
+    
+    addLog('🕷️ SignalCrawler v2.0 initialized', 'success');
+    addLog('📰 News filter active', 'info');
+    addLog('🎯 ORB bias tracking enabled', 'info');
 });
 

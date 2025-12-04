@@ -1,4 +1,4 @@
-/* Prop Firm Scanner Dashboard v2 - Styles */
+/* SignalCrawler v2.0 Dashboard Styles */
 
 * {
     margin: 0;
@@ -23,6 +23,8 @@
     --accent-yellow: #ffaa00;
     --accent-purple: #aa66ff;
     --accent-cyan: #00d4ff;
+    --accent-gold: #ffd700;
+    --accent-coral: #ff6b6b;
 }
 
 body {
@@ -75,22 +77,41 @@ header {
 }
 
 .logo-icon {
-    width: 42px; height: 42px;
+    width: 48px; height: 48px;
     background: linear-gradient(135deg, var(--accent-green), var(--accent-cyan));
-    border-radius: 12px;
+    border-radius: 14px;
     display: flex;
     align-items: center;
     justify-content: center;
-    font-size: 22px;
+    font-size: 26px;
+    box-shadow: 0 4px 20px rgba(0, 255, 136, 0.3);
+}
+
+.logo-text {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
 }
 
 .logo h1 {
-    font-size: 1.4rem;
+    font-size: 1.5rem;
     font-weight: 700;
     background: linear-gradient(135deg, var(--text-primary), var(--accent-cyan));
     -webkit-background-clip: text;
     -webkit-text-fill-color: transparent;
     background-clip: text;
+    line-height: 1.2;
+}
+
+.version-badge {
+    font-size: 0.65rem;
+    font-weight: 500;
+    color: var(--accent-gold);
+    background: rgba(255, 215, 0, 0.1);
+    padding: 3px 8px;
+    border-radius: 10px;
+    border: 1px solid rgba(255, 215, 0, 0.3);
+    width: fit-content;
 }
 
 .header-status {
@@ -245,6 +266,58 @@ main {
     font-size: 0.8rem;
     color: var(--text-muted);
 }
+
+/* v2.0 Status Cards */
+.v2-status {
+    grid-template-columns: repeat(4, 1fr);
+}
+
+.news-card {
+    background: linear-gradient(135deg, rgba(255, 170, 0, 0.08), rgba(255, 68, 102, 0.05));
+    border-color: rgba(255, 170, 0, 0.3);
+}
+
+.news-card.blackout {
+    background: linear-gradient(135deg, rgba(255, 68, 102, 0.15), rgba(255, 68, 102, 0.08));
+    border-color: rgba(255, 68, 102, 0.5);
+    animation: pulse-warning 2s infinite;
+}
+
+@keyframes pulse-warning {
+    0%, 100% { box-shadow: 0 0 0 0 rgba(255, 68, 102, 0.4); }
+    50% { box-shadow: 0 0 20px 5px rgba(255, 68, 102, 0.2); }
+}
+
+.bias-card {
+    background: linear-gradient(135deg, rgba(68, 136, 255, 0.08), rgba(170, 102, 255, 0.05));
+    border-color: rgba(68, 136, 255, 0.3);
+}
+
+.bias-card.long {
+    background: linear-gradient(135deg, rgba(0, 255, 136, 0.12), rgba(0, 212, 255, 0.05));
+    border-color: rgba(0, 255, 136, 0.4);
+}
+
+.bias-card.short {
+    background: linear-gradient(135deg, rgba(255, 68, 102, 0.12), rgba(255, 107, 107, 0.05));
+    border-color: rgba(255, 68, 102, 0.4);
+}
+
+.signals-today-card {
+    background: linear-gradient(135deg, rgba(0, 255, 136, 0.08), rgba(0, 212, 255, 0.05));
+    border-color: rgba(0, 255, 136, 0.3);
+}
+
+.apex-quick-card {
+    background: linear-gradient(135deg, rgba(255, 68, 102, 0.08), rgba(255, 170, 0, 0.05));
+    border-color: rgba(255, 68, 102, 0.2);
+}
+
+/* Badge variants */
+.status-badge.long { background: rgba(0, 255, 136, 0.2); color: var(--accent-green); }
+.status-badge.short { background: rgba(255, 68, 102, 0.2); color: var(--accent-red); }
+.status-badge.neutral { background: rgba(136, 136, 160, 0.2); color: var(--text-secondary); }
+.status-badge.blackout { background: rgba(255, 68, 102, 0.3); color: var(--accent-red); animation: pulse 1s infinite; }
 
 /* Apex Rules Panel */
 .apex-panel {
@@ -807,11 +880,24 @@ main {
 ::-webkit-scrollbar-thumb:hover { background: var(--text-muted); }
 
 /* Responsive */
+@media (max-width: 1200px) {
+    .v2-status { grid-template-columns: repeat(2, 1fr); }
+}
+
 @media (max-width: 768px) {
     header { padding: 14px 16px; flex-direction: column; gap: 12px; }
     main { padding: 16px; }
     .nav-tabs { padding: 10px 16px; flex-wrap: wrap; }
     .status-grid { grid-template-columns: 1fr 1fr; }
+    .v2-status { grid-template-columns: 1fr 1fr; }
     .apex-grid { grid-template-columns: 1fr; }
+    .logo-icon { width: 40px; height: 40px; font-size: 22px; }
+    .logo h1 { font-size: 1.2rem; }
+    .version-badge { font-size: 0.55rem; }
+}
+
+@media (max-width: 480px) {
+    .v2-status { grid-template-columns: 1fr; }
+    .status-grid { grid-template-columns: 1fr; }
 }
 

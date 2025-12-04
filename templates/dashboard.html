@@ -14,8 +14,11 @@
 
     <header>
         <div class="logo">
-            <div class="logo-icon">🎯</div>
-            <h1>Prop Firm Scanner</h1>
+            <div class="logo-icon">🕷️</div>
+            <div class="logo-text">
+                <h1>SignalCrawler</h1>
+                <span class="version-badge">v2.0 • $250 Risk • 80%+ • 2:1 R:R</span>
+            </div>
         </div>
         <div class="header-status">
             <div class="live-indicator">
@@ -73,7 +76,50 @@
                 </div>
             </div>
 
-            <!-- Market Regime & Quick Status -->
+            <!-- v2.0 Quick Status Row -->
+            <div class="status-grid v2-status" style="margin-bottom: 24px;">
+                <!-- News Filter Card -->
+                <div class="status-card news-card" id="newsCard">
+                    <div class="status-card-header">
+                        <span class="status-card-title">📰 News Filter</span>
+                        <span class="status-badge ok" id="newsBadge">CLEAR</span>
+                    </div>
+                    <div class="status-value" id="newsValue" style="font-size: 1rem;">Loading...</div>
+                    <div class="status-subtitle" id="newsSubtitle">Next high-impact event</div>
+                </div>
+
+                <!-- Daily Bias Card -->
+                <div class="status-card bias-card" id="biasCard">
+                    <div class="status-card-header">
+                        <span class="status-card-title">🎯 Daily Bias</span>
+                        <span class="status-badge warning" id="biasBadge">WAITING</span>
+                    </div>
+                    <div class="status-value" id="biasValue" style="font-size: 1.3rem;">--</div>
+                    <div class="status-subtitle" id="biasSubtitle">ORB not yet formed</div>
+                </div>
+
+                <!-- Today's Signals Card -->
+                <div class="status-card signals-today-card">
+                    <div class="status-card-header">
+                        <span class="status-card-title">📊 Today</span>
+                        <span class="status-badge ok" id="todaySignalsBadge">0</span>
+                    </div>
+                    <div class="status-value green" id="todaySignalsValue" style="font-size: 1.3rem;">0</div>
+                    <div class="status-subtitle">Valid signals today</div>
+                </div>
+
+                <!-- Apex Quick Status -->
+                <div class="status-card apex-quick-card">
+                    <div class="status-card-header">
+                        <span class="status-card-title">⚠️ Apex</span>
+                        <span class="status-badge ok" id="apexQuickBadge">OK</span>
+                    </div>
+                    <div class="status-value" id="apexQuickValue" style="font-size: 1rem;">$0 / $2,500</div>
+                    <div class="status-subtitle" id="apexQuickSubtitle">Daily loss remaining</div>
+                </div>
+            </div>
+
+            <!-- System Stats Row -->
             <div class="status-grid" style="margin-bottom: 24px;">
                 <!-- Market Regime Card -->
                 <div class="status-card" style="background: linear-gradient(135deg, rgba(170, 102, 255, 0.1), rgba(68, 136, 255, 0.05)); border-color: rgba(170, 102, 255, 0.3);">
@@ -81,18 +127,26 @@
                         <span class="status-card-title">🌊 Market Regime</span>
                         <span class="status-badge warning" id="regimeBadge">UNKNOWN</span>
                     </div>
-                    <div class="status-value" id="regimeValue" style="font-size: 1.2rem; color: var(--accent-purple);">Detecting...</div>
+                    <div class="status-value" id="regimeValue" style="font-size: 1.1rem; color: var(--accent-purple);">Detecting...</div>
                     <div class="status-subtitle" id="regimeGuidance">Analyzing market conditions</div>
                 </div>
 
-                <!-- Apex Quick Status -->
-                <div class="status-card" style="background: linear-gradient(135deg, rgba(255, 68, 102, 0.08), rgba(255, 170, 0, 0.05)); border-color: rgba(255, 68, 102, 0.2);">
+                <!-- Key Levels Card -->
+                <div class="status-card" style="background: linear-gradient(135deg, rgba(0, 255, 136, 0.08), rgba(0, 212, 255, 0.05)); border-color: rgba(0, 255, 136, 0.2);">
                     <div class="status-card-header">
-                        <span class="status-card-title">⚠️ Apex Status</span>
-                        <span class="status-badge ok" id="apexQuickBadge">OK</span>
+                        <span class="status-card-title">📍 Key Levels</span>
+                        <span class="status-badge warning" id="levelsBadge">BUILDING</span>
                     </div>
-                    <div class="status-value" id="apexQuickValue" style="font-size: 1.2rem;">$0 / $2,500</div>
-                    <div class="status-subtitle" id="apexQuickSubtitle">Daily loss limit remaining</div>
+                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 8px;">
+                        <div style="text-align: center; padding: 6px; background: rgba(0,255,136,0.1); border-radius: 6px;">
+                            <div style="font-size: 0.65rem; color: var(--text-muted);">ORB Range</div>
+                            <div id="orbRange" style="font-size: 0.85rem; font-family: 'JetBrains Mono';">--</div>
+                        </div>
+                        <div style="text-align: center; padding: 6px; background: rgba(255,68,102,0.1); border-radius: 6px;">
+                            <div style="font-size: 0.65rem; color: var(--text-muted);">PDH / PDL</div>
+                            <div id="pdhPdl" style="font-size: 0.85rem; font-family: 'JetBrains Mono';">-- / --</div>
+                        </div>
+                    </div>
                 </div>
 
                 <!-- System Status -->
