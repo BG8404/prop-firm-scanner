@@ -58,6 +58,7 @@ from analytics import (
 from ai_tuning import (
     get_optimization_summary, auto_tune, get_tuning_history, get_performance_trend
 )
+from market_levels import get_market_levels, MarketLevels
 from strategy_coach import run_analysis as run_coach_analysis, get_insights as get_coach_insights
 from suggestion_manager import (
     add_suggestions, get_pending_suggestions, approve_suggestion,
@@ -102,7 +103,10 @@ DISCORD_WEBHOOK_URL = os.environ.get("DISCORD_WEBHOOK_URL", "")
 
 
 def send_discord_alert(ticker, signal, analysis_details=None):
-    """Send trade signal alert to Discord"""
+    """
+    Send trade signal alert to Discord - SignalCrawler v2.0
+    Now includes daily bias and key levels
+    """
     if not DISCORD_WEBHOOK_URL:
         print("⚠️ Discord webhook not configured")
         return False
@@ -115,6 +119,13 @@ def send_discord_alert(ticker, signal, analysis_details=None):
         target = signal.get('takeProfit', 0)
         
         print(f"📱 Sending Discord alert: {ticker} {direction} {confidence}%")
+        
+        # Get market levels for context
+        market_lvls = get_market_levels()
+        levels_info = market_lvls.get_all_levels(ticker, entry)
+        bias_info = levels_info.get('bias', {})
+        orb = levels_info.get('orb', {})
+        pdh_pdl = levels_info.get('pdh_pdl', {})
         
         # Calculate R:R
         if direction == 'LONG' and entry and stop and target:
@@ -142,35 +153,39 @@ def send_discord_alert(ticker, signal, analysis_details=None):
             emoji = "⚪"
             color = 0x808080  # Gray
         
-        # Build Discord embed
+        # Daily bias emoji
+        bias = bias_info.get('bias', 'UNKNOWN')
+        bias_emoji = '🟢' if bias == 'LONG' else '🔴' if bias == 'SHORT' else '⚪'
+        
+        # Build Discord embed with v2.0 format
         embed = {
-            "title": f"{emoji} {ticker} - {direction}",
+            "title": f"{emoji} SignalCrawler v2.0 - {ticker}",
             "color": color,
             "fields": [
-                {"name": "📊 Confidence", "value": f"{confidence}%", "inline": True},
-                {"name": "📈 Entry", "value": f"${entry:.2f}" if entry else "N/A", "inline": True},
-                {"name": "🛑 Stop", "value": f"${stop:.2f}" if stop else "N/A", "inline": True},
-                {"name": "🎯 Target", "value": f"${target:.2f}" if target else "N/A", "inline": True},
-                {"name": "⚖️ Risk:Reward", "value": f"{rr}:1" if rr else "N/A", "inline": True},
+                # Daily Bias (NEW)
+                {"name": f"{bias_emoji} Daily Bias", "value": f"**{bias}**\n{bias_info.get('reason', 'N/A')[:100]}", "inline": False},
+                # Key Levels (NEW)
+                {"name": "📊 Key Levels", "value": f"ORB: {orb.get('low', 'N/A'):.2f} - {orb.get('high', 'N/A'):.2f}\nPDH: {pdh_pdl.get('pdh', 'N/A') or 'N/A'}\nPDL: {pdh_pdl.get('pdl', 'N/A') or 'N/A'}" if orb.get('high') else "Levels not available", "inline": False},
+                # Signal details
+                {"name": f"{emoji} Signal", "value": f"**{direction}** @ {confidence}% confidence", "inline": True},
+                {"name": "📈 Entry", "value": f"{entry:.2f}" if entry else "N/A", "inline": True},
+                {"name": "🛑 Stop", "value": f"{stop:.2f}" if stop else "N/A", "inline": True},
+                {"name": "🎯 Target", "value": f"{target:.2f}" if target else "N/A", "inline": True},
+                {"name": "⚖️ R:R", "value": f"{rr}:1" if rr else "N/A", "inline": True},
             ],
-            "footer": {"text": "SignalCrawler"},
+            "footer": {"text": "SignalCrawler v2.0 • 80%+ • $250 Risk • 2:1 R:R"},
             "timestamp": dt.datetime.now().isoformat()
         }
-        
-        # Add rationale if available
-        rationale = signal.get('rationale', '')
-        if rationale:
-            embed["description"] = rationale[:500]  # Limit length
         
         # Add position sizing if available
         if analysis_details:
             position = analysis_details.get('position_size', {})
             if position:
                 contracts = position.get('contracts', 1)
-                actual_risk = position.get('actual_risk', 500)
-                potential_profit = position.get('potential_profit', 1000)
+                actual_risk = position.get('actual_risk', 250)
+                potential_profit = position.get('potential_profit', 500)
                 embed["fields"].append({
-                    "name": "📊 Position Size ($500 Risk)",
+                    "name": "📊 Position Size ($250 Risk)",
                     "value": f"**{contracts} contracts**\nRisk: ${actual_risk:.0f} → Profit: ${potential_profit:.0f}",
                     "inline": False
                 })
@@ -183,9 +198,16 @@ def send_discord_alert(ticker, signal, analysis_details=None):
                     "inline": False
                 })
         
+        # Add ALL CRITERIA MET badge
+        embed["fields"].append({
+            "name": "✅ Status",
+            "value": "**ALL CRITERIA MET** - Trade Approved",
+            "inline": False
+        })
+        
         # Send to Discord
         payload = {
-            "username": "SignalCrawler",
+            "username": "SignalCrawler v2.0",
             "embeds": [embed]
         }
         
@@ -202,14 +224,15 @@ def send_discord_alert(ticker, signal, analysis_details=None):
         print(f"⚠️ Discord alert failed: {e}")
         return False
 
-# ========= QUALITY FILTERS =========
-MIN_CONFIDENCE = 70
-MIN_DISCORD_CONFIDENCE = 80  # Only Discord alert above this
+# ========= QUALITY FILTERS (v2.0) =========
+MIN_CONFIDENCE = 80  # Only 80%+ signals now
+MIN_DISCORD_CONFIDENCE = 80  # Discord alert threshold
 MAX_PRICE_DRIFT_TICKS = 15
 REQUIRE_MOMENTUM_ALIGNMENT = True
-MIN_RISK_REWARD = 1.5
+MIN_RISK_REWARD = 2.0  # Exact 2:1 R:R required
 ANALYSIS_INTERVAL_MINUTES = 5  # Only auto-analyze every N minutes
-# ===================================
+PDH_PDL_BUFFER = 15  # Must be 15+ pts from PDH/PDL
+# ==========================================
 
 # Track last analysis time per ticker
 last_analysis_time = {}
@@ -585,7 +608,18 @@ def calculate_risk_reward(entry, stop, target):
 
 
 def validate_signal(signal, ticker):
-    """Run quality checks on AI signal"""
+    """
+    Run quality checks on AI signal - SignalCrawler v2.0
+    
+    ALL criteria must be met:
+    1. Confidence >= 80%
+    2. Valid direction
+    3. Required price levels
+    4. R:R >= 2.0
+    5. Price drift acceptable
+    6. ORB bias alignment (LONG/SHORT must match daily bias)
+    7. PDH/PDL safety (not too close to major levels)
+    """
     reasons = []
     
     direction = signal.get('direction', 'no_trade')
@@ -595,13 +629,16 @@ def validate_signal(signal, ticker):
     target = signal.get('takeProfit')
     current_price = signal.get('currentPrice')
     
-    # Check 1: Confidence
+    # Get market levels for bias and level checks
+    market_lvls = get_market_levels()
+    
+    # Check 1: Confidence (80%+ required)
     if confidence < MIN_CONFIDENCE:
         reasons.append(f"❌ Confidence {confidence}% below threshold {MIN_CONFIDENCE}%")
         return False, reasons
     
     # Check 2: Direction
-    if direction == "no_trade":
+    if direction == "no_trade" or direction == "STAY_AWAY":
         reasons.append("⚠️  AI suggests no trade")
         return False, reasons
     
@@ -610,7 +647,7 @@ def validate_signal(signal, ticker):
         reasons.append("❌ Missing required price levels")
         return False, reasons
     
-    # Check 4: R:R
+    # Check 4: R:R (2:1 minimum)
     rr = calculate_risk_reward(entry, stop, target)
     if rr < MIN_RISK_REWARD:
         reasons.append(f"❌ R:R {rr:.2f} below minimum {MIN_RISK_REWARD}")
@@ -625,16 +662,22 @@ def validate_signal(signal, ticker):
         reasons.append(f"❌ Price drifted {drift_ticks:.1f} ticks from entry")
         return False, reasons
     
-    # Check 6: Momentum alignment - DISABLED (MTF analyzer already checks direction alignment)
-    # if REQUIRE_MOMENTUM_ALIGNMENT:
-    #     is_aligned, momentum_desc = check_momentum_alignment(ticker, direction)
-    #     if not is_aligned:
-    #         reasons.append(f"❌ Recent momentum conflicts: {momentum_desc}")
-    #         return False, reasons
-    #     reasons.append(f"✓ Momentum: {momentum_desc}")
-    reasons.append("✓ MTF alignment confirmed")
+    # Check 6: ORB Bias Alignment (NEW in v2.0)
+    bias_aligned, bias_reason = market_lvls.check_bias_alignment(ticker, direction, current_price)
+    if not bias_aligned:
+        reasons.append(f"❌ {bias_reason}")
+        return False, reasons
+    reasons.append(f"✓ {bias_reason}")
+    
+    # Check 7: PDH/PDL Safety (NEW in v2.0)
+    level_safe, level_reason = market_lvls.check_entry_safety(ticker, entry, direction)
+    if not level_safe:
+        reasons.append(f"❌ {level_reason}")
+        return False, reasons
+    reasons.append(f"✓ {level_reason}")
     
     # All checks passed
+    reasons.append("✓ MTF alignment confirmed")
     reasons.append(f"✓ Confidence: {confidence}%")
     reasons.append(f"✓ R:R: {rr:.2f}")
     reasons.append(f"✓ Price drift: {drift_ticks:.1f} ticks")
@@ -996,7 +1039,7 @@ def analyze_mobile(ticker_symbol=None):
         </style>
     </head>
     <body>
-        <h1>🕷️ SignalCrawler</h1>
+        <h1>🕷️ SignalCrawler v2.0</h1>
         <div class="time">Analyzed: {est_time_str("%I:%M:%S %p")} EST</div>
     '''
     
@@ -1012,6 +1055,16 @@ def analyze_mobile(ticker_symbol=None):
         warnings = r.get('warnings', [])
         stay_reason = r.get('stay_away_reason', '')
         message = r.get('message', '')
+        
+        # v2.0 additions
+        daily_bias = r.get('daily_bias', 'UNKNOWN')
+        orb_high = r.get('orb_high')
+        orb_low = r.get('orb_low')
+        pdh = r.get('pdh')
+        pdl = r.get('pdl')
+        all_criteria_met = r.get('all_criteria_met', False)
+        criteria_met = r.get('criteria_met', [])
+        criteria_failed = r.get('criteria_failed', [])
         
         # Direction styling
         if status == 'insufficient_data':
@@ -1030,6 +1083,9 @@ def analyze_mobile(ticker_symbol=None):
         # Confidence styling
         conf_class = 'conf-high' if confidence >= 80 else 'conf-med' if confidence >= 70 else 'conf-low'
         
+        # Bias styling
+        bias_emoji = '🟢' if daily_bias == 'LONG' else '🔴' if daily_bias == 'SHORT' else '⚪'
+        
         html += f'''
         <div class="card">
             <div class="ticker">{ticker}</div>
@@ -1041,31 +1097,60 @@ def analyze_mobile(ticker_symbol=None):
             <div class="confidence {conf_class}">{confidence}%</div>
             '''
             
+            # Daily Bias Box (NEW in v2.0)
+            html += f'''
+            <div style="background:#1a1a2a;border:1px solid #3a3a5a;padding:10px;border-radius:8px;margin:12px 0;text-align:center;">
+                <div style="font-size:0.75rem;color:#888;margin-bottom:4px;">DAILY BIAS (ORB)</div>
+                <div style="font-size:1.3rem;font-weight:bold;">{bias_emoji} {daily_bias}</div>
+            </div>
+            '''
+            
+            # Key Levels (NEW in v2.0)
+            if orb_high or pdh:
+                html += '''
+                <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin:12px 0;">
+                '''
+                if orb_high and orb_low:
+                    html += f'''
+                    <div style="background:#1a2a1a;border:1px solid #2a4a2a;padding:8px;border-radius:8px;text-align:center;">
+                        <div style="font-size:0.7rem;color:#888;">ORB RANGE</div>
+                        <div style="font-size:0.9rem;color:#aaffaa;">{orb_low:.2f} - {orb_high:.2f}</div>
+                    </div>
+                    '''
+                if pdh and pdl:
+                    html += f'''
+                    <div style="background:#2a1a1a;border:1px solid #4a2a2a;padding:8px;border-radius:8px;text-align:center;">
+                        <div style="font-size:0.7rem;color:#888;">PDH / PDL</div>
+                        <div style="font-size:0.9rem;color:#ffaaaa;">{pdh:.2f} / {pdl:.2f}</div>
+                    </div>
+                    '''
+                html += '</div>'
+            
             if entry and stop and target:
                 html += f'''
                 <div class="prices">
                     <div class="price-box">
                         <div class="price-label">ENTRY</div>
-                        <div class="price-value">${entry:.2f}</div>
+                        <div class="price-value">{entry:.2f}</div>
                     </div>
                     <div class="price-box">
                         <div class="price-label">STOP</div>
-                        <div class="price-value">${stop:.2f}</div>
+                        <div class="price-value">{stop:.2f}</div>
                     </div>
                     <div class="price-box">
                         <div class="price-label">TARGET</div>
-                        <div class="price-value">${target:.2f}</div>
+                        <div class="price-value">{target:.2f}</div>
                     </div>
                 </div>
                 '''
-                html += f'<div style="text-align:center;margin-top:8px;color:#888;">R:R 2:1 (Fixed)</div>'
+                html += f'<div style="text-align:center;margin-top:8px;color:#888;">R:R 2:1 (Fixed) | $250 Risk</div>'
                 
                 # Position sizing box
                 position = r.get('position_size', {})
                 if position:
                     contracts = position.get('contracts', 1)
-                    actual_risk = position.get('actual_risk', 500)
-                    potential_profit = position.get('potential_profit', 1000)
+                    actual_risk = position.get('actual_risk', 250)
+                    potential_profit = position.get('potential_profit', 500)
                     html += f'''
                     <div style="background:#1a2a3a;border:1px solid #2a4a6a;padding:12px;border-radius:8px;margin-top:12px;text-align:center;">
                         <div style="font-size:1.5rem;font-weight:bold;color:#00d4ff;">{contracts} contracts</div>
@@ -1076,6 +1161,23 @@ def analyze_mobile(ticker_symbol=None):
                     </div>
                     '''
             
+            # Criteria Status (NEW in v2.0)
+            if all_criteria_met:
+                html += '''
+                <div style="background:#1a3a1a;border:2px solid #00ff88;padding:12px;border-radius:8px;margin-top:12px;text-align:center;">
+                    <div style="font-size:1.1rem;font-weight:bold;color:#00ff88;">✅ ALL CRITERIA MET</div>
+                    <div style="font-size:0.8rem;color:#aaffaa;margin-top:4px;">Trade Approved</div>
+                </div>
+                '''
+            elif criteria_failed:
+                html += '''
+                <div style="background:#3a1a1a;border:2px solid #ff4444;padding:12px;border-radius:8px;margin-top:12px;">
+                    <div style="font-size:0.9rem;font-weight:bold;color:#ff4444;margin-bottom:8px;">❌ CRITERIA NOT MET</div>
+                '''
+                for cf in criteria_failed:
+                    html += f'<div style="font-size:0.8rem;color:#ffaaaa;">{cf}</div>'
+                html += '</div>'
+            
             if stay_reason:
                 html += f'<div class="warning">🚫 {stay_reason}</div>'
             
@@ -1084,7 +1186,7 @@ def analyze_mobile(ticker_symbol=None):
             
             # Add entry instructions
             entry_instruction = r.get('entry_instruction', '')
-            if entry_instruction and direction in ('LONG', 'SHORT'):
+            if entry_instruction and direction in ('LONG', 'SHORT') and all_criteria_met:
                 html += f'''
                 <div style="background:#1a2a1a;border:1px solid #2a4a2a;padding:12px;border-radius:8px;margin-top:12px;">
                     <div style="font-weight:bold;color:#00ff88;margin-bottom:8px;">📝 Entry Instructions</div>
@@ -1107,20 +1209,31 @@ def analyze_mobile(ticker_symbol=None):
 
 
 def run_analysis(ticker_symbol=None, send_alerts=False):
-    """Run analysis and return results"""
+    """
+    Run analysis and return results - SignalCrawler v2.0
+    Now includes ORB bias and PDH/PDL level checking
+    """
     try:
         from database import TICKERS
         
         results = []
         tickers_to_analyze = [ticker_symbol.upper()] if ticker_symbol else list(TICKERS.keys())
         
+        # Get market levels tracker
+        market_lvls = get_market_levels()
+        
         for ticker in tickers_to_analyze:
-            base_ticker = ticker.replace('=F', '').replace('Z2025', '').replace('Z2026', '')
+            base_ticker = normalize_ticker(ticker)
             
             # Get candle data
             candles_1m = list(candle_storage["1m"].get(base_ticker, []))
             candles_5m = list(candle_storage["5m"].get(base_ticker, []))
             candles_15m = list(candle_storage["15m"].get(base_ticker, []))
+            
+            # Update market levels from candle data
+            all_candles = candles_1m + candles_5m + candles_15m
+            if all_candles:
+                market_lvls.update_from_candles(ticker, all_candles)
             
             if len(candles_1m) < 10:
                 results.append({
@@ -1135,38 +1248,98 @@ def run_analysis(ticker_symbol=None, send_alerts=False):
             
             direction = mtf_result.get('direction', 'STAY_AWAY')
             confidence = mtf_result.get('confidence', 0)
+            entry = mtf_result.get('entry')
+            
+            # Get market levels info
+            levels_info = market_lvls.get_all_levels(ticker, entry)
+            bias_info = levels_info.get('bias', {})
+            
+            # Check bias alignment and level safety
+            bias_aligned = True
+            level_safe = True
+            criteria_met = []
+            criteria_failed = []
+            
+            if direction in ('LONG', 'SHORT') and entry:
+                # Check bias
+                aligned, bias_reason = market_lvls.check_bias_alignment(ticker, direction, entry)
+                if aligned:
+                    criteria_met.append(f"✅ Bias: {bias_reason}")
+                else:
+                    criteria_failed.append(f"❌ Bias: {bias_reason}")
+                    bias_aligned = False
+                
+                # Check level safety
+                safe, level_reason = market_lvls.check_entry_safety(ticker, entry, direction)
+                if safe:
+                    criteria_met.append(f"✅ Levels: {level_reason}")
+                else:
+                    criteria_failed.append(f"❌ Levels: {level_reason}")
+                    level_safe = False
+                
+                # Check confidence
+                if confidence >= MIN_CONFIDENCE:
+                    criteria_met.append(f"✅ Confidence: {confidence}% >= {MIN_CONFIDENCE}%")
+                else:
+                    criteria_failed.append(f"❌ Confidence: {confidence}% < {MIN_CONFIDENCE}%")
+                
+                # Check R:R
+                rr = mtf_result.get('risk_reward', 0)
+                if rr >= MIN_RISK_REWARD:
+                    criteria_met.append(f"✅ R:R: {rr}:1 >= {MIN_RISK_REWARD}:1")
+                else:
+                    criteria_failed.append(f"❌ R:R: {rr}:1 < {MIN_RISK_REWARD}:1")
+            
+            all_criteria_met = len(criteria_failed) == 0 and confidence >= MIN_CONFIDENCE and direction in ('LONG', 'SHORT')
             
             result = {
                 "ticker": ticker,
                 "direction": direction,
                 "confidence": confidence,
-                "entry": mtf_result.get('entry'),
+                "entry": entry,
                 "stop": mtf_result.get('stop'),
                 "target": mtf_result.get('target'),
                 "risk_reward": mtf_result.get('risk_reward'),
                 "warnings": mtf_result.get('warnings', []),
                 "stay_away_reason": mtf_result.get('stay_away_reason'),
                 "entry_instruction": mtf_result.get('entry_instruction', ''),
-                "position_size": mtf_result.get('position_size', {})
+                "position_size": mtf_result.get('position_size', {}),
+                # v2.0 additions
+                "daily_bias": bias_info.get('bias', 'UNKNOWN'),
+                "bias_reason": bias_info.get('reason', ''),
+                "orb_high": levels_info.get('orb', {}).get('high'),
+                "orb_low": levels_info.get('orb', {}).get('low'),
+                "pdh": levels_info.get('pdh_pdl', {}).get('pdh'),
+                "pdl": levels_info.get('pdh_pdl', {}).get('pdl'),
+                "bias_aligned": bias_aligned,
+                "level_safe": level_safe,
+                "all_criteria_met": all_criteria_met,
+                "criteria_met": criteria_met,
+                "criteria_failed": criteria_failed
             }
             results.append(result)
             
-            # Send Discord alert for valid signals
-            if send_alerts and direction in ('LONG', 'SHORT') and confidence >= MIN_DISCORD_CONFIDENCE:
+            # Send Discord alert ONLY if ALL criteria are met
+            if send_alerts and all_criteria_met:
                 signal = {
                     'direction': direction,
                     'confidence': confidence,
-                    'entry': mtf_result.get('entry'),
+                    'entry': entry,
                     'stop': mtf_result.get('stop'),
                     'takeProfit': mtf_result.get('target'),
                     'rationale': mtf_result.get('rationale', '')
                 }
                 send_discord_alert(ticker, signal, mtf_result)
-                add_log(f"📱 On-demand: {ticker} {direction} {confidence}%", "success")
+                add_log(f"📱 v2.0 Alert: {ticker} {direction} {confidence}% - ALL CRITERIA MET", "success")
+            elif send_alerts and direction in ('LONG', 'SHORT') and confidence >= MIN_CONFIDENCE:
+                # Log why not alerted
+                add_log(f"⚠️ {ticker} {direction} {confidence}% - Criteria failed: {', '.join(criteria_failed)}", "warning")
         
         return results
         
     except Exception as e:
+        import traceback
+        traceback.print_exc()
         return [{"error": str(e)}]
 
 
@@ -2117,34 +2290,42 @@ def webhook():
             }
             
             if direction != "no_trade":
-                # Validate signal
+                # Update market levels from candle data (v2.0)
+                market_lvls = get_market_levels()
+                all_candles = candles_1m + candles_5m + candles_15m
+                if all_candles:
+                    market_lvls.update_from_candles(ticker, all_candles)
+                
+                # Validate signal with v2.0 criteria (includes bias + level checks)
                 is_valid, reasons = validate_signal(signal, ticker)
                 signal_entry["valid"] = is_valid
                 
-                print(f"\n🔍 Quality Check:")
+                print(f"\n🔍 SignalCrawler v2.0 Quality Check:")
                 for reason in reasons:
                     print(f"   {reason}")
                 
-                # SIMPLIFIED: Send Discord for ALL 70%+ signals
-                if confidence >= 70:
-                    status = "✅ VALID" if is_valid else "⚠️ REJECTED"
-                    print(f"\n{status}: {ticker} {direction.upper()} {confidence}%")
+                # v2.0: Only alert when ALL criteria are met
+                if is_valid and confidence >= MIN_CONFIDENCE:
+                    print(f"\n✅ ALL CRITERIA MET: {ticker} {direction.upper()} {confidence}%")
                     
-                    # Always send Discord for 70%+ signals
+                    # Send Discord alert for valid signals only
                     discord_signal = {
-                        'direction': direction.upper() if is_valid else 'REJECTED',
+                        'direction': direction.upper(),
                         'confidence': confidence,
                         'entry': signal.get('entry') or signal.get('currentPrice') or 0,
                         'stop': signal.get('stop') or 0,
                         'takeProfit': signal.get('takeProfit') or 0,
-                        'rationale': signal.get('rationale', '') if is_valid else f"❌ {', '.join(reasons)}"
+                        'rationale': signal.get('rationale', '')
                     }
                     
                     try:
-                        label = ticker if is_valid else f"{ticker} (REJECTED)"
-                        send_discord_alert(label, discord_signal, mtf_result)
+                        send_discord_alert(ticker, discord_signal, mtf_result)
                     except Exception as e:
                         print(f"⚠️ Discord failed: {e}")
+                elif confidence >= 70:
+                    # Log rejected signals but don't alert
+                    print(f"\n⚠️ CRITERIA NOT MET: {ticker} {direction.upper()} {confidence}%")
+                    add_log(f"⛔ Criteria failed: {ticker} - {', '.join(r for r in reasons if '❌' in r)}", "warning")
                 
                 # Save valid signals to Trade Journal
                 if is_valid:
@@ -2255,12 +2436,16 @@ def open_browser():
 
 if __name__ == '__main__':
     print("\n" + "="*60)
-    print("🚀 TRADINGVIEW WEBHOOK SCANNER STARTING")
+    print("🕷️ SIGNALCRAWLER v2.0 STARTING")
     print("="*60)
-    print(f"Email Alerts: {ENABLE_EMAIL_ALERTS}")
-    print(f"Min Confidence: {MIN_CONFIDENCE}%")
-    print(f"Min R:R: {MIN_RISK_REWARD}:1")
-    print(f"Momentum Check: {REQUIRE_MOMENTUM_ALIGNMENT}")
+    print("📋 v2.0 Settings:")
+    print(f"   • Min Confidence: {MIN_CONFIDENCE}%")
+    print(f"   • Min R:R: {MIN_RISK_REWARD}:1")
+    print(f"   • Risk per Trade: $250")
+    print(f"   • PDH/PDL Buffer: {PDH_PDL_BUFFER} pts")
+    print(f"   • Analysis Interval: {ANALYSIS_INTERVAL_MINUTES} min")
+    print(f"   • ORB Bias Required: Yes")
+    print(f"   • Level Safety Required: Yes")
     print("="*60)
     
     # Initialize database and start outcome checker

@@ -10,7 +10,7 @@ CONFIDENCE SCORING:
 5. Catalysts & Volatility - 10% (News/time awareness)
 
 POSITION SIZING:
-- Fixed $500 risk per trade
+- Fixed $250 risk per trade
 - Exact 2:1 R:R (target = 2× stop distance)
 - Calculate contracts based on tick value
 
@@ -23,7 +23,7 @@ from datetime import datetime
 import statistics
 
 # Position sizing configuration
-RISK_PER_TRADE = 500  # $500 risk per trade
+RISK_PER_TRADE = 250  # $250 risk per trade
 TARGET_RR = 2.0       # Exact 2:1 risk/reward
 
 # Tick values per contract (how much $1 move = in dollars)
@@ -38,7 +38,7 @@ TICK_VALUES = {
 
 def calculate_position_size(ticker, entry, stop):
     """
-    Calculate position size for $500 risk
+    Calculate position size for $250 risk
     Returns: contracts, risk_per_contract, potential_profit
     """
     # Get tick info for ticker
@@ -58,7 +58,7 @@ def calculate_position_size(ticker, entry, stop):
     # Risk per contract
     risk_per_contract = ticks_to_stop * tick_value
     
-    # Contracts needed for $500 risk
+    # Contracts needed for $250 risk
     if risk_per_contract > 0:
         contracts = int(RISK_PER_TRADE / risk_per_contract)
         contracts = max(1, contracts)  # Minimum 1 contract
@@ -579,7 +579,7 @@ class MTFAnalyzer:
             # R:R is now exactly 2:1
             result['risk_reward'] = TARGET_RR
             
-            # ========== POSITION SIZING ($500 risk) ==========
+            # ========== POSITION SIZING ($250 risk) ==========
             position = calculate_position_size(ticker, result['entry'], result['stop'])
             result['position_size'] = position
             
