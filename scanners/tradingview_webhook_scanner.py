@@ -59,6 +59,7 @@ from ai_tuning import (
     get_optimization_summary, auto_tune, get_tuning_history, get_performance_trend
 )
 from market_levels import get_market_levels, MarketLevels
+from news_filter import check_news_blackout, get_news_status, get_upcoming_events
 from strategy_coach import run_analysis as run_coach_analysis, get_insights as get_coach_insights
 from suggestion_manager import (
     add_suggestions, get_pending_suggestions, approve_suggestion,
@@ -612,13 +613,14 @@ def validate_signal(signal, ticker):
     Run quality checks on AI signal - SignalCrawler v2.0
     
     ALL criteria must be met:
-    1. Confidence >= 80%
-    2. Valid direction
-    3. Required price levels
-    4. R:R >= 2.0
-    5. Price drift acceptable
-    6. ORB bias alignment (LONG/SHORT must match daily bias)
-    7. PDH/PDL safety (not too close to major levels)
+    1. No active news blackout
+    2. Confidence >= 80%
+    3. Valid direction
+    4. Required price levels
+    5. R:R >= 2.0
+    6. Price drift acceptable
+    7. ORB bias alignment (LONG/SHORT must match daily bias)
+    8. PDH/PDL safety (not too close to major levels)
     """
     reasons = []
     
@@ -628,6 +630,12 @@ def validate_signal(signal, ticker):
     stop = signal.get('stop')
     target = signal.get('takeProfit')
     current_price = signal.get('currentPrice')
+    
+    # Check 0: News blackout (NEW - blocks all trading during major news)
+    is_blackout, news_event = check_news_blackout()
+    if is_blackout:
+        reasons.append(f"🚫 NEWS BLACKOUT: {news_event['event']} - Clear in {news_event['minutes_until_clear']} min")
+        return False, reasons
     
     # Get market levels for bias and level checks
     market_lvls = get_market_levels()
@@ -1043,6 +1051,28 @@ def analyze_mobile(ticker_symbol=None):
         <div class="time">Analyzed: {est_time_str("%I:%M:%S %p")} EST</div>
     '''
     
+    # Check for news blackout and show banner
+    is_news_blackout, news_event = check_news_blackout()
+    if is_news_blackout:
+        html += f'''
+        <div style="background:#4a1a1a;border:2px solid #ff4444;padding:12px;border-radius:8px;margin:12px 0;text-align:center;">
+            <div style="font-size:1.1rem;font-weight:bold;color:#ff4444;">🚫 NEWS BLACKOUT ACTIVE</div>
+            <div style="font-size:0.9rem;color:#ffaaaa;margin-top:4px;">📰 {news_event['event']}</div>
+            <div style="font-size:0.85rem;color:#888;margin-top:4px;">Clear in {news_event['minutes_until_clear']} min</div>
+        </div>
+        '''
+    else:
+        # Show upcoming events if any
+        upcoming = get_upcoming_events(days_ahead=2)
+        if upcoming:
+            next_event = upcoming[0]
+            html += f'''
+            <div style="background:#1a2a3a;border:1px solid #2a4a6a;padding:8px;border-radius:8px;margin:12px 0;text-align:center;">
+                <div style="font-size:0.8rem;color:#888;">📅 Next Event: {next_event['date']} {next_event['time']}</div>
+                <div style="font-size:0.85rem;color:#aaddff;">{next_event['event']}</div>
+            </div>
+            '''
+    
     for r in results:
         ticker = r.get('ticker', 'UNKNOWN')
         status = r.get('status', '')
@@ -1211,13 +1241,16 @@ def analyze_mobile(ticker_symbol=None):
 def run_analysis(ticker_symbol=None, send_alerts=False):
     """
     Run analysis and return results - SignalCrawler v2.0
-    Now includes ORB bias and PDH/PDL level checking
+    Now includes ORB bias, PDH/PDL level checking, and news filter
     """
     try:
         from database import TICKERS
         
         results = []
         tickers_to_analyze = [ticker_symbol.upper()] if ticker_symbol else list(TICKERS.keys())
+        
+        # Check for news blackout first
+        is_news_blackout, news_event = check_news_blackout()
         
         # Get market levels tracker
         market_lvls = get_market_levels()
@@ -1313,14 +1346,24 @@ def run_analysis(ticker_symbol=None, send_alerts=False):
                 "pdl": levels_info.get('pdh_pdl', {}).get('pdl'),
                 "bias_aligned": bias_aligned,
                 "level_safe": level_safe,
-                "all_criteria_met": all_criteria_met,
+                "all_criteria_met": all_criteria_met and not is_news_blackout,
                 "criteria_met": criteria_met,
-                "criteria_failed": criteria_failed
+                "criteria_failed": criteria_failed,
+                # News filter status
+                "news_blackout": is_news_blackout,
+                "news_event": news_event.get('event') if news_event else None,
+                "news_clear_in": news_event.get('minutes_until_clear') if news_event else None
             }
+            
+            # Add news blackout to criteria if active
+            if is_news_blackout:
+                result['criteria_failed'].append(f"🚫 News: {news_event['event']} - Clear in {news_event['minutes_until_clear']} min")
+                result['all_criteria_met'] = False
+            
             results.append(result)
             
-            # Send Discord alert ONLY if ALL criteria are met
-            if send_alerts and all_criteria_met:
+            # Send Discord alert ONLY if ALL criteria are met (and no news blackout)
+            if send_alerts and all_criteria_met and not is_news_blackout:
                 signal = {
                     'direction': direction,
                     'confidence': confidence,
@@ -1659,6 +1702,29 @@ def apex_check():
             "blocked": blocked,
             "reason": reason
         })
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+# ========= NEWS FILTER API =========
+
+@app.route('/api/news/status')
+def news_status():
+    """Get current news blackout status"""
+    try:
+        status = get_news_status()
+        return jsonify(status)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/news/upcoming')
+def news_upcoming():
+    """Get upcoming high-impact events"""
+    try:
+        days = request.args.get('days', 7, type=int)
+        events = get_upcoming_events(days_ahead=days)
+        return jsonify({"events": events})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
@@ -2446,6 +2512,16 @@ if __name__ == '__main__':
     print(f"   • Analysis Interval: {ANALYSIS_INTERVAL_MINUTES} min")
     print(f"   • ORB Bias Required: Yes")
     print(f"   • Level Safety Required: Yes")
+    print(f"   • News Filter: Active (FOMC, CPI, NFP)")
+    print("="*60)
+    
+    # Show upcoming news events
+    from news_filter import get_upcoming_events
+    upcoming = get_upcoming_events(days_ahead=7)
+    if upcoming:
+        print("📅 Upcoming High-Impact Events:")
+        for evt in upcoming[:3]:
+            print(f"   • {evt['date']} {evt['time']} - {evt['event']}")
     print("="*60)
     
     # Initialize database and start outcome checker
