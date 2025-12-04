@@ -422,39 +422,39 @@ function getTradeActions(trade) {
 
 async function markTrade(tradeId, outcome) {
     try {
-        const response = await fetch(\`/api/trade/\${tradeId}/outcome\`, {
+        const response = await fetch('/api/trade/' + tradeId + '/outcome', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ outcome: outcome })
         });
         
         if (response.ok) {
-            addLog(\`Trade #\${tradeId} marked as \${outcome}\`, outcome === 'WIN' ? 'success' : 'error');
-            loadTrades(); // Refresh
+            addLog('Trade #' + tradeId + ' marked as ' + outcome, outcome === 'WIN' ? 'success' : 'error');
+            loadTrades();
         } else {
-            addLog(\`Failed to update trade #\${tradeId}\`, 'error');
+            addLog('Failed to update trade #' + tradeId, 'error');
         }
     } catch (error) {
-        addLog(\`Error: \${error.message}\`, 'error');
+        addLog('Error: ' + error.message, 'error');
     }
 }
 
 async function deleteTrade(tradeId) {
-    if (!confirm('Delete this trade? (You didn\\'t take it)')) return;
+    if (!confirm('Delete this trade? (You did not take it)')) return;
     
     try {
-        const response = await fetch(\`/api/trade/\${tradeId}\`, {
+        const response = await fetch('/api/trade/' + tradeId, {
             method: 'DELETE'
         });
         
         if (response.ok) {
-            addLog(\`Trade #\${tradeId} deleted\`, 'info');
-            loadTrades(); // Refresh
+            addLog('Trade #' + tradeId + ' deleted', 'info');
+            loadTrades();
         } else {
-            addLog(\`Failed to delete trade #\${tradeId}\`, 'error');
+            addLog('Failed to delete trade #' + tradeId, 'error');
         }
     } catch (error) {
-        addLog(\`Error: \${error.message}\`, 'error');
+        addLog('Error: ' + error.message, 'error');
     }
 }
 
