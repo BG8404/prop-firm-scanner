@@ -158,11 +158,28 @@ def send_discord_alert(ticker, signal, analysis_details=None):
         bias = bias_info.get('bias', 'UNKNOWN')
         bias_emoji = '🟢' if bias == 'LONG' else '🔴' if bias == 'SHORT' else '⚪'
         
+        # Get timeframe trends from analysis
+        tf15_trend = '?'
+        tf5_trend = '?'
+        tf1_trend = '?'
+        if analysis_details:
+            tf_data = analysis_details.get('components', {}).get('timeframe', {})
+            tf15_trend = tf_data.get('tf15', {}).get('direction', '?')
+            tf5_trend = tf_data.get('tf5', {}).get('direction', '?')
+            tf1_trend = tf_data.get('tf1', {}).get('direction', '?')
+        
+        def trend_emoji(t):
+            if t == 'bullish': return '🟢'
+            if t == 'bearish': return '🔴'
+            return '⚪'
+        
         # Build Discord embed with v2.0 format
         embed = {
             "title": f"{emoji} SignalCrawler v2.0 - {ticker}",
             "color": color,
             "fields": [
+                # Timeframe Trends (15m, 5m, 1m)
+                {"name": "📊 Timeframe Trends", "value": f"{trend_emoji(tf15_trend)} 15m: **{tf15_trend.upper()}**  |  {trend_emoji(tf5_trend)} 5m: **{tf5_trend.upper()}**  |  {trend_emoji(tf1_trend)} 1m: **{tf1_trend.upper()}**", "inline": False},
                 # Daily Bias (NEW)
                 {"name": f"{bias_emoji} Daily Bias", "value": f"**{bias}**\n{bias_info.get('reason', 'N/A')[:100]}", "inline": False},
                 # Key Levels (NEW)
@@ -1135,6 +1152,47 @@ def analyze_mobile(ticker_symbol=None):
             </div>
             '''
             
+            # Timeframe Trends (15m, 5m, 1m)
+            tf15_trend = r.get('tf15_trend', '?')
+            tf15_str = r.get('tf15_strength', '?')
+            tf5_trend = r.get('tf5_trend', '?')
+            tf5_str = r.get('tf5_strength', '?')
+            tf1_trend = r.get('tf1_trend', '?')
+            tf1_str = r.get('tf1_strength', '?')
+            
+            def trend_color(trend):
+                if trend == 'bullish': return '#00ff88'
+                if trend == 'bearish': return '#ff4466'
+                return '#888888'
+            
+            def trend_emoji(trend):
+                if trend == 'bullish': return '🟢'
+                if trend == 'bearish': return '🔴'
+                return '⚪'
+            
+            html += f'''
+            <div style="background:#1a1a24;border:1px solid #2a2a3a;padding:10px;border-radius:8px;margin:12px 0;">
+                <div style="font-size:0.75rem;color:#888;margin-bottom:8px;text-align:center;">TIMEFRAME TRENDS</div>
+                <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;text-align:center;">
+                    <div style="background:#0a0a0f;padding:8px;border-radius:6px;">
+                        <div style="font-size:0.7rem;color:#666;">15m</div>
+                        <div style="font-size:0.95rem;font-weight:bold;color:{trend_color(tf15_trend)};">{trend_emoji(tf15_trend)} {tf15_trend.upper()}</div>
+                        <div style="font-size:0.65rem;color:#888;">{tf15_str}</div>
+                    </div>
+                    <div style="background:#0a0a0f;padding:8px;border-radius:6px;">
+                        <div style="font-size:0.7rem;color:#666;">5m</div>
+                        <div style="font-size:0.95rem;font-weight:bold;color:{trend_color(tf5_trend)};">{trend_emoji(tf5_trend)} {tf5_trend.upper()}</div>
+                        <div style="font-size:0.65rem;color:#888;">{tf5_str}</div>
+                    </div>
+                    <div style="background:#0a0a0f;padding:8px;border-radius:6px;">
+                        <div style="font-size:0.7rem;color:#666;">1m</div>
+                        <div style="font-size:0.95rem;font-weight:bold;color:{trend_color(tf1_trend)};">{trend_emoji(tf1_trend)} {tf1_trend.upper()}</div>
+                        <div style="font-size:0.65rem;color:#888;">{tf1_str}</div>
+                    </div>
+                </div>
+            </div>
+            '''
+            
             # Key Levels (NEW in v2.0)
             if orb_high or pdh:
                 html += '''
@@ -1325,6 +1383,12 @@ def run_analysis(ticker_symbol=None, send_alerts=False):
             
             all_criteria_met = len(criteria_failed) == 0 and confidence >= MIN_CONFIDENCE and direction in ('LONG', 'SHORT')
             
+            # Get timeframe trends from MTF analysis
+            tf_data = mtf_result.get('components', {}).get('timeframe', {})
+            tf15 = tf_data.get('tf15', {})
+            tf5 = tf_data.get('tf5', {})
+            tf1 = tf_data.get('tf1', {})
+            
             result = {
                 "ticker": ticker,
                 "direction": direction,
@@ -1337,6 +1401,14 @@ def run_analysis(ticker_symbol=None, send_alerts=False):
                 "stay_away_reason": mtf_result.get('stay_away_reason'),
                 "entry_instruction": mtf_result.get('entry_instruction', ''),
                 "position_size": mtf_result.get('position_size', {}),
+                # Timeframe trends (15m, 5m, 1m)
+                "tf15_trend": tf15.get('direction', '?'),
+                "tf15_strength": tf15.get('strength', '?'),
+                "tf5_trend": tf5.get('direction', '?'),
+                "tf5_strength": tf5.get('strength', '?'),
+                "tf1_trend": tf1.get('direction', '?'),
+                "tf1_strength": tf1.get('strength', '?'),
+                "alignment": tf_data.get('alignment', 'unknown'),
                 # v2.0 additions
                 "daily_bias": bias_info.get('bias', 'UNKNOWN'),
                 "bias_reason": bias_info.get('reason', ''),
