@@ -2580,7 +2580,7 @@ def webhook():
                         'is_valid': True
                     }
                     signal_id = save_signal(signal_to_save)
-                        print(f"📍 Signal #{signal_id} saved to Trade Journal")
+                    print(f"📍 Signal #{signal_id} saved to Trade Journal")
                     send_email_alert(ticker, signal, reasons)
                 else:
                     add_log(f"⛔ Rejected: {ticker} {direction.upper()} {confidence}%", "warning")
