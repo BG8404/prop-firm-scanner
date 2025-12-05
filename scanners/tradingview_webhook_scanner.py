@@ -255,6 +255,80 @@ PDH_PDL_BUFFER = 15  # Must be 15+ pts from PDH/PDL
 # Track last analysis time per ticker
 last_analysis_time = {}
 
+# ========= SMART ALERT COOLDOWN =========
+# Only send alerts when something ACTUALLY changes, not every 5 minutes
+last_alert_info = {}  # {ticker: {'direction': 'LONG', 'entry': 25800, 'confidence': 92, 'time': datetime}}
+
+# Thresholds for new alert (per ticker type)
+ALERT_PRICE_THRESHOLD = {
+    'MNQ': 50,   # 50 points (~$25 move)
+    'MES': 10,   # 10 points (~$12.50 move)
+    'MGC': 5,    # 5 points (~$5 move)
+    'DEFAULT': 20
+}
+ALERT_CONFIDENCE_THRESHOLD = 10  # Alert if confidence increased by 10%+
+ALERT_MIN_COOLDOWN_MINUTES = 15  # Minimum time between alerts for same setup
+
+def should_send_alert(ticker, direction, entry, confidence):
+    """
+    Smart cooldown - only send alert if:
+    1. Direction changed (LONG → SHORT or vice versa)
+    2. Price moved significantly from last alert
+    3. Confidence increased significantly
+    4. OR minimum cooldown passed with same direction
+    
+    Returns: (should_send: bool, reason: str)
+    """
+    import re
+    # Normalize ticker
+    base_ticker = re.sub(r'[FGHJKMNQUVXZ]\d{4}$', '', ticker).replace('=F', '').upper()
+    
+    last = last_alert_info.get(base_ticker)
+    
+    if not last:
+        return True, "First alert for this ticker"
+    
+    last_dir = last.get('direction')
+    last_entry = last.get('entry', 0)
+    last_conf = last.get('confidence', 0)
+    last_time = last.get('time')
+    
+    # 1. Direction changed - ALWAYS alert
+    if direction != last_dir:
+        return True, f"Direction changed: {last_dir} → {direction}"
+    
+    # 2. Price moved significantly
+    price_threshold = ALERT_PRICE_THRESHOLD.get(base_ticker, ALERT_PRICE_THRESHOLD['DEFAULT'])
+    price_diff = abs(entry - last_entry) if entry and last_entry else 0
+    if price_diff >= price_threshold:
+        return True, f"Price moved {price_diff:.1f} pts (threshold: {price_threshold})"
+    
+    # 3. Confidence increased significantly
+    conf_diff = confidence - last_conf
+    if conf_diff >= ALERT_CONFIDENCE_THRESHOLD:
+        return True, f"Confidence increased +{conf_diff}% (was {last_conf}%)"
+    
+    # 4. Minimum cooldown passed
+    if last_time:
+        minutes_since = (dt.datetime.now() - last_time).total_seconds() / 60
+        if minutes_since >= ALERT_MIN_COOLDOWN_MINUTES:
+            return True, f"Cooldown passed ({minutes_since:.0f} min since last)"
+    
+    # Same setup, no significant change
+    return False, f"Same setup (dir={direction}, price diff={price_diff:.1f}, cooldown not met)"
+
+def record_alert_sent(ticker, direction, entry, confidence):
+    """Record that we sent an alert for this ticker"""
+    import re
+    base_ticker = re.sub(r'[FGHJKMNQUVXZ]\d{4}$', '', ticker).replace('=F', '').upper()
+    last_alert_info[base_ticker] = {
+        'direction': direction,
+        'entry': entry,
+        'confidence': confidence,
+        'time': dt.datetime.now()
+    }
+    print(f"📝 Recorded alert: {base_ticker} {direction} @ {entry} ({confidence}%)")
+
 # ========= PRODUCT SETTINGS =========
 TICK_SIZES = {
     "MNQ": 0.25, "MNQ=F": 0.25,
@@ -326,7 +400,7 @@ def load_candle_history():
             # Normalize the ticker (MNQZ2025 -> MNQ)
             base_ticker = normalize_ticker(ticker)
             
-            for tf in ["1m", "5m", "15m"]:
+        for tf in ["1m", "5m", "15m"]:
                 candles = timeframes.get(tf, [])
                 if candles:
                     maxlen = 100 if tf == "1m" else 50 if tf == "5m" else 30
@@ -1436,16 +1510,23 @@ def run_analysis(ticker_symbol=None, send_alerts=False):
             
             # Send Discord alert ONLY if ALL criteria are met (and no news blackout)
             if send_alerts and all_criteria_met and not is_news_blackout:
-                signal = {
-                    'direction': direction,
-                    'confidence': confidence,
-                    'entry': entry,
-                    'stop': mtf_result.get('stop'),
-                    'takeProfit': mtf_result.get('target'),
-                    'rationale': mtf_result.get('rationale', '')
-                }
-                send_discord_alert(ticker, signal, mtf_result)
-                add_log(f"📱 v2.0 Alert: {ticker} {direction} {confidence}% - ALL CRITERIA MET", "success")
+                # SMART COOLDOWN: Check if we should actually send this alert
+                should_send, cooldown_reason = should_send_alert(ticker, direction, entry, confidence)
+                
+                if should_send:
+                    signal = {
+                        'direction': direction,
+                        'confidence': confidence,
+                        'entry': entry,
+                        'stop': mtf_result.get('stop'),
+                        'takeProfit': mtf_result.get('target'),
+                        'rationale': mtf_result.get('rationale', '')
+                    }
+                    send_discord_alert(ticker, signal, mtf_result)
+                    record_alert_sent(ticker, direction, entry, confidence)
+                    add_log(f"📱 v2.0 Alert: {ticker} {direction} {confidence}% - {cooldown_reason}", "success")
+                else:
+                    add_log(f"🔇 Skipped alert: {ticker} {direction} {confidence}% - {cooldown_reason}", "info")
             elif send_alerts and direction in ('LONG', 'SHORT') and confidence >= MIN_CONFIDENCE:
                 # Log why not alerted
                 add_log(f"⚠️ {ticker} {direction} {confidence}% - Criteria failed: {', '.join(criteria_failed)}", "warning")
@@ -1530,17 +1611,17 @@ def mark_trade_outcome(trade_id):
         conn = get_connection()
         cursor = conn.cursor()
         
-        # Get the trade to calculate P&L
-        cursor.execute('SELECT entry_price, stop_price, target_price, direction FROM signal_recommendations WHERE id = ?', (trade_id,))
+        # Get the trade to calculate P&L (column names: entry, stop, target)
+        cursor.execute('SELECT entry, stop, target, direction FROM signal_recommendations WHERE id = ?', (trade_id,))
         trade = cursor.fetchone()
         
         if not trade:
             conn.close()
             return jsonify({"error": "Trade not found"}), 404
         
-        entry = trade['entry_price'] or 0
-        stop = trade['stop_price'] or 0
-        target = trade['target_price'] or 0
+        entry = trade['entry'] or 0
+        stop = trade['stop'] or 0
+        target = trade['target'] or 0
         direction = (trade['direction'] or '').upper()
         
         # Calculate P&L based on outcome
@@ -2446,20 +2527,30 @@ def webhook():
                 if is_valid and confidence >= MIN_CONFIDENCE:
                     print(f"\n✅ ALL CRITERIA MET: {ticker} {direction.upper()} {confidence}%")
                     
-                    # Send Discord alert for valid signals only
-                    discord_signal = {
-                        'direction': direction.upper(),
-                        'confidence': confidence,
-                        'entry': signal.get('entry') or signal.get('currentPrice') or 0,
-                        'stop': signal.get('stop') or 0,
-                        'takeProfit': signal.get('takeProfit') or 0,
-                        'rationale': signal.get('rationale', '')
-                    }
+                    entry_price = signal.get('entry') or signal.get('currentPrice') or 0
                     
-                    try:
-                        send_discord_alert(ticker, discord_signal, mtf_result)
-                    except Exception as e:
-                        print(f"⚠️ Discord failed: {e}")
+                    # SMART COOLDOWN: Check if we should actually send this alert
+                    should_send, cooldown_reason = should_send_alert(ticker, direction.upper(), entry_price, confidence)
+                    
+                    if should_send:
+                        # Send Discord alert for valid signals only
+                        discord_signal = {
+                            'direction': direction.upper(),
+                            'confidence': confidence,
+                            'entry': entry_price,
+                            'stop': signal.get('stop') or 0,
+                            'takeProfit': signal.get('takeProfit') or 0,
+                            'rationale': signal.get('rationale', '')
+                        }
+                        
+                        try:
+                            send_discord_alert(ticker, discord_signal, mtf_result)
+                            record_alert_sent(ticker, direction.upper(), entry_price, confidence)
+                            print(f"📱 Alert sent: {cooldown_reason}")
+                        except Exception as e:
+                            print(f"⚠️ Discord failed: {e}")
+                    else:
+                        print(f"🔇 Alert skipped: {cooldown_reason}")
                 elif confidence >= 70:
                     # Log rejected signals but don't alert
                     print(f"\n⚠️ CRITERIA NOT MET: {ticker} {direction.upper()} {confidence}%")
@@ -2475,22 +2566,22 @@ def webhook():
                     else:
                         dashboard_stats["signal_count"] += 1
                         add_log(f"✅ VALID: {ticker} {direction.upper()} {confidence}%", "success")
-                        
-                        signal_to_save = {
-                            'ticker': ticker,
-                            'direction': direction,
-                            'confidence': confidence,
-                            'entry': signal.get('entry'),
-                            'stop': signal.get('stop'),
-                            'takeProfit': signal.get('takeProfit'),
-                            'currentPrice': signal.get('currentPrice'),
-                            'entryType': signal.get('entryType'),
-                            'rationale': signal.get('rationale'),
-                            'is_valid': True
-                        }
-                        signal_id = save_signal(signal_to_save)
+                    
+                    signal_to_save = {
+                        'ticker': ticker,
+                        'direction': direction,
+                        'confidence': confidence,
+                        'entry': signal.get('entry'),
+                        'stop': signal.get('stop'),
+                        'takeProfit': signal.get('takeProfit'),
+                        'currentPrice': signal.get('currentPrice'),
+                        'entryType': signal.get('entryType'),
+                        'rationale': signal.get('rationale'),
+                        'is_valid': True
+                    }
+                    signal_id = save_signal(signal_to_save)
                         print(f"📍 Signal #{signal_id} saved to Trade Journal")
-                        send_email_alert(ticker, signal, reasons)
+                    send_email_alert(ticker, signal, reasons)
                 else:
                     add_log(f"⛔ Rejected: {ticker} {direction.upper()} {confidence}%", "warning")
             else:
