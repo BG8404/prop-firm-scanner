@@ -445,15 +445,16 @@ def load_levels_from_database():
             # LOAD PDH/PDL (Previous Day High/Low)
             # ============================================
             # Query for yesterday's session high/low (RTH: 9:30 AM - 4:00 PM)
+            # Use LIKE to match contract months (MNQ%, MNQZ2025, etc.)
             cursor.execute('''
                 SELECT 
                     MAX(high) as pdh, 
                     MIN(low) as pdl,
                     COUNT(*) as candle_count
                 FROM candle_history
-                WHERE ticker = ? 
+                WHERE ticker LIKE ? 
                 AND date(timestamp) = ?
-            ''', (ticker, yesterday.isoformat()))
+            ''', (ticker + '%', yesterday.isoformat()))
             
             row = cursor.fetchone()
             
@@ -487,11 +488,11 @@ def load_levels_from_database():
                         MIN(low) as orb_low,
                         COUNT(*) as candle_count
                     FROM candle_history
-                    WHERE ticker = ?
+                    WHERE ticker LIKE ?
                     AND date(timestamp) = ?
                     AND time(timestamp) >= '09:30:00'
                     AND time(timestamp) < '10:00:00'
-                ''', (ticker, today.isoformat()))
+                ''', (ticker + '%', today.isoformat()))
                 
                 orb_row = cursor.fetchone()
                 
@@ -528,10 +529,10 @@ def load_levels_from_database():
                     MAX(high) as session_high, 
                     MIN(low) as session_low
                 FROM candle_history
-                WHERE ticker = ?
+                WHERE ticker LIKE ?
                 AND date(timestamp) = ?
                 AND time(timestamp) >= '09:30:00'
-            ''', (ticker, today.isoformat()))
+            ''', (ticker + '%', today.isoformat()))
             
             session_row = cursor.fetchone()
             
