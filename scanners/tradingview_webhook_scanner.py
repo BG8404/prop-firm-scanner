@@ -19,16 +19,54 @@ import webbrowser
 import threading
 import time
 
-# EST timezone helper
+# EST timezone helper using pytz for proper timezone handling
+import pytz
+EST = pytz.timezone('America/New_York')
+
 def est_now():
-    """Get current time in EST (UTC-5)"""
-    utc_now = dt.datetime.utcnow()
-    est_offset = dt.timedelta(hours=-5)
-    return utc_now + est_offset
+    """Get current time in EST"""
+    return dt.datetime.now(EST)
 
 def est_time_str(fmt="%H:%M:%S"):
     """Get EST time as formatted string"""
     return est_now().strftime(fmt)
+
+def convert_to_est(timestamp_str):
+    """
+    Convert a timestamp string to EST.
+    Handles various formats from TradingView.
+    Returns EST datetime string in format: YYYY-MM-DD HH:MM:SS
+    """
+    if not timestamp_str:
+        return est_now().strftime("%Y-%m-%d %H:%M:%S")
+    
+    try:
+        # Try parsing ISO format with timezone
+        if 'T' in str(timestamp_str):
+            # ISO format: 2025-12-05T17:18:00Z or 2025-12-05T17:18:00+00:00
+            ts = str(timestamp_str).replace('Z', '+00:00')
+            parsed = dt.datetime.fromisoformat(ts)
+            if parsed.tzinfo is None:
+                # Assume UTC if no timezone
+                parsed = pytz.UTC.localize(parsed)
+            est_time = parsed.astimezone(EST)
+            return est_time.strftime("%Y-%m-%d %H:%M:%S")
+        
+        # Try parsing just time (HH:MM:SS) - assume it's from today
+        if len(str(timestamp_str)) <= 8 and ':' in str(timestamp_str):
+            today = est_now().date()
+            time_parts = str(timestamp_str).split(':')
+            hour = int(time_parts[0])
+            minute = int(time_parts[1]) if len(time_parts) > 1 else 0
+            second = int(time_parts[2]) if len(time_parts) > 2 else 0
+            return f"{today} {hour:02d}:{minute:02d}:{second:02d}"
+        
+        # Already in correct format or other format - return as-is
+        return str(timestamp_str)
+        
+    except Exception as e:
+        print(f"⚠️ Time conversion error: {e}, using current EST time")
+        return est_now().strftime("%Y-%m-%d %H:%M:%S")
 
 # Auto ngrok tunnel
 try:
@@ -2399,15 +2437,20 @@ def webhook():
         print(f"{'='*60}")
         print(f"Data: {json.dumps(data, indent=2)}")
         
-        # Store the candle
+        # Store the candle - CONVERT TIME TO EST
+        raw_time = data.get("time")
+        est_timestamp = convert_to_est(raw_time)
+        
         candle_data = {
-            "time": data.get("time"),
+            "time": est_timestamp,  # Now in EST!
             "open": float(data.get("open", 0)),
             "high": float(data.get("high", 0)),
             "low": float(data.get("low", 0)),
             "close": float(data.get("close", 0)),
             "volume": int(data.get("volume", 0))
         }
+        
+        print(f"   ⏰ Time: {raw_time} → EST: {est_timestamp}")
         
         store_candle(ticker, timeframe, candle_data)
         
