@@ -404,5 +404,163 @@ def get_market_levels():
     return market_levels
 
 
+def load_levels_from_database():
+    """
+    Load PDH/PDL and ORB levels from historical candle data in database.
+    Called on app startup to populate levels immediately.
+    """
+    try:
+        import sqlite3
+        import os
+        
+        # Get database path
+        if os.path.exists('/app/data'):
+            db_path = '/app/data/trade_journal.db'
+        else:
+            db_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'trade_journal.db')
+        
+        if not os.path.exists(db_path):
+            print("⚠️ Database not found - levels will build from live data")
+            return
+        
+        conn = sqlite3.connect(db_path)
+        conn.row_factory = sqlite3.Row
+        cursor = conn.cursor()
+        
+        today = datetime.now(EST).date()
+        yesterday = today - timedelta(days=1)
+        current_time = datetime.now(EST).time()
+        
+        # Also check if it's a weekend, go back to Friday
+        while yesterday.weekday() >= 5:  # Saturday=5, Sunday=6
+            yesterday = yesterday - timedelta(days=1)
+        
+        tickers = ['MNQ', 'MES', 'MGC']
+        
+        print(f"📊 Loading historical levels from database...")
+        print(f"   Today: {today}, Looking for previous day: {yesterday}")
+        
+        for ticker in tickers:
+            # ============================================
+            # LOAD PDH/PDL (Previous Day High/Low)
+            # ============================================
+            # Query for yesterday's session high/low (RTH: 9:30 AM - 4:00 PM)
+            cursor.execute('''
+                SELECT 
+                    MAX(high) as pdh, 
+                    MIN(low) as pdl,
+                    COUNT(*) as candle_count
+                FROM candle_history
+                WHERE ticker = ? 
+                AND date(timestamp) = ?
+            ''', (ticker, yesterday.isoformat()))
+            
+            row = cursor.fetchone()
+            
+            if row and row['pdh'] and row['pdl'] and row['candle_count'] > 0:
+                pdh = row['pdh']
+                pdl = row['pdl']
+                
+                # Set PDH/PDL in the market levels tracker
+                if today not in market_levels.levels[ticker]:
+                    market_levels.levels[ticker][today] = {
+                        'orb_high': None, 'orb_low': None, 'orb_candles': [],
+                        'pdh': None, 'pdl': None,
+                        'session_high': None, 'session_low': None
+                    }
+                
+                market_levels.levels[ticker][today]['pdh'] = pdh
+                market_levels.levels[ticker][today]['pdl'] = pdl
+                
+                print(f"   ✅ {ticker} PDH: {pdh:.2f}, PDL: {pdl:.2f} (from {row['candle_count']} candles)")
+            else:
+                print(f"   ⚠️ {ticker} No previous day data found")
+            
+            # ============================================
+            # LOAD ORB (Opening Range 9:30-10:00 AM)
+            # ============================================
+            # Only load if after 10:00 AM (ORB complete)
+            if current_time >= ORB_END:
+                cursor.execute('''
+                    SELECT 
+                        MAX(high) as orb_high, 
+                        MIN(low) as orb_low,
+                        COUNT(*) as candle_count
+                    FROM candle_history
+                    WHERE ticker = ?
+                    AND date(timestamp) = ?
+                    AND time(timestamp) >= '09:30:00'
+                    AND time(timestamp) < '10:00:00'
+                ''', (ticker, today.isoformat()))
+                
+                orb_row = cursor.fetchone()
+                
+                if orb_row and orb_row['orb_high'] and orb_row['orb_low'] and orb_row['candle_count'] > 0:
+                    orb_high = orb_row['orb_high']
+                    orb_low = orb_row['orb_low']
+                    
+                    if today not in market_levels.levels[ticker]:
+                        market_levels.levels[ticker][today] = {
+                            'orb_high': None, 'orb_low': None, 'orb_candles': [],
+                            'pdh': None, 'pdl': None,
+                            'session_high': None, 'session_low': None
+                        }
+                    
+                    market_levels.levels[ticker][today]['orb_high'] = orb_high
+                    market_levels.levels[ticker][today]['orb_low'] = orb_low
+                    market_levels.orb_complete[ticker][today] = True
+                    
+                    # Calculate bias
+                    market_levels._calculate_daily_bias(ticker, today)
+                    bias = market_levels.daily_bias[ticker].get(today, 'NEUTRAL')
+                    
+                    print(f"   ✅ {ticker} ORB: {orb_low:.2f} - {orb_high:.2f}, Bias: {bias}")
+                else:
+                    print(f"   ⚠️ {ticker} No ORB data for today yet")
+            else:
+                print(f"   ⏳ {ticker} ORB not complete yet (before 10:00 AM)")
+            
+            # ============================================
+            # LOAD TODAY'S SESSION HIGH/LOW
+            # ============================================
+            cursor.execute('''
+                SELECT 
+                    MAX(high) as session_high, 
+                    MIN(low) as session_low
+                FROM candle_history
+                WHERE ticker = ?
+                AND date(timestamp) = ?
+                AND time(timestamp) >= '09:30:00'
+            ''', (ticker, today.isoformat()))
+            
+            session_row = cursor.fetchone()
+            
+            if session_row and session_row['session_high']:
+                if today in market_levels.levels[ticker]:
+                    market_levels.levels[ticker][today]['session_high'] = session_row['session_high']
+                    market_levels.levels[ticker][today]['session_low'] = session_row['session_low']
+        
+        conn.close()
+        
+        print("✅ Historical levels loaded from database")
+        
+        # Print summary
+        for ticker in tickers:
+            levels = market_levels.levels[ticker].get(today, {})
+            pdh = levels.get('pdh')
+            pdl = levels.get('pdl')
+            orb_high = levels.get('orb_high')
+            orb_low = levels.get('orb_low')
+            
+            print(f"   📍 {ticker}: PDH={pdh or 'N/A'}, PDL={pdl or 'N/A'}, ORB={orb_low or 'N/A'}-{orb_high or 'N/A'}")
+        
+    except Exception as e:
+        print(f"⚠️ Error loading levels from database: {e}")
+        import traceback
+        traceback.print_exc()
+
+
+# Auto-load on import
 print("✅ Market Levels tracker loaded (ORB + PDH/PDL)")
+load_levels_from_database()
 
