@@ -1645,62 +1645,78 @@ def api_check_outcomes():
 def mark_trade_outcome(trade_id):
     """Manually mark a trade as WIN or LOSS"""
     try:
-        from database import get_connection
+        from database import get_connection, db_lock
+        import time as time_module
+        
         data = request.get_json(force=True, silent=True) or {}
         outcome = data.get('outcome', '').upper()
         
         if outcome not in ['WIN', 'LOSS']:
             return jsonify({"error": "Outcome must be WIN or LOSS"}), 400
         
-        conn = get_connection()
-        cursor = conn.cursor()
-        
-        # Get the trade to calculate P&L (column names: entry, stop, target)
-        cursor.execute('SELECT entry, stop, target, direction FROM signal_recommendations WHERE id = ?', (trade_id,))
-        trade = cursor.fetchone()
-        
-        if not trade:
-            conn.close()
-            return jsonify({"error": "Trade not found"}), 404
-        
-        entry = trade['entry'] or 0
-        stop = trade['stop'] or 0
-        target = trade['target'] or 0
-        direction = (trade['direction'] or '').upper()
-        
-        # Calculate P&L based on outcome
-        if outcome == 'WIN':
-            if direction == 'LONG':
-                pnl = target - entry
-            else:
-                pnl = entry - target
-            exit_price = target
-        else:  # LOSS
-            if direction == 'LONG':
-                pnl = stop - entry  # Negative
-            else:
-                pnl = entry - stop  # Negative
-            exit_price = stop
-        
-        # Update the trade
-        cursor.execute('''
-            UPDATE signal_recommendations 
-            SET outcome = ?, exit_price = ?, pnl_ticks = ?, exit_time = CURRENT_TIMESTAMP
-            WHERE id = ?
-        ''', (outcome, exit_price, pnl, trade_id))
-        
-        # Update strategy version stats
-        cursor.execute(f'''
-            UPDATE strategy_versions 
-            SET {outcome.lower()}s = {outcome.lower()}s + 1,
-                win_rate = CASE WHEN (wins + losses) > 0 
-                           THEN ROUND(100.0 * wins / (wins + losses), 1) 
-                           ELSE NULL END
-            WHERE is_active = 1
-        ''')
-        
-        conn.commit()
-        conn.close()
+        # Use database lock with retry logic
+        max_retries = 3
+        for attempt in range(max_retries):
+            try:
+                with db_lock:
+                    conn = get_connection()
+                    conn.execute("PRAGMA busy_timeout = 5000")  # 5 second timeout
+                    cursor = conn.cursor()
+                    
+                    # Get the trade to calculate P&L (column names: entry, stop, target)
+                    cursor.execute('SELECT entry, stop, target, direction FROM signal_recommendations WHERE id = ?', (trade_id,))
+                    trade = cursor.fetchone()
+                    
+                    if not trade:
+                        conn.close()
+                        return jsonify({"error": "Trade not found"}), 404
+                    
+                    entry = trade['entry'] or 0
+                    stop = trade['stop'] or 0
+                    target = trade['target'] or 0
+                    direction = (trade['direction'] or '').upper()
+                    
+                    # Calculate P&L based on outcome
+                    if outcome == 'WIN':
+                        if direction == 'LONG':
+                            pnl = target - entry
+                        else:
+                            pnl = entry - target
+                        exit_price = target
+                    else:  # LOSS
+                        if direction == 'LONG':
+                            pnl = stop - entry  # Negative
+                        else:
+                            pnl = entry - stop  # Negative
+                        exit_price = stop
+                    
+                    # Update the trade
+                    cursor.execute('''
+                        UPDATE signal_recommendations 
+                        SET outcome = ?, exit_price = ?, pnl_ticks = ?, exit_time = CURRENT_TIMESTAMP
+                        WHERE id = ?
+                    ''', (outcome, exit_price, pnl, trade_id))
+                    
+                    # Update strategy version stats
+                    cursor.execute(f'''
+                        UPDATE strategy_versions 
+                        SET {outcome.lower()}s = {outcome.lower()}s + 1,
+                            win_rate = CASE WHEN (wins + losses) > 0 
+                                       THEN ROUND(100.0 * wins / (wins + losses), 1) 
+                                       ELSE NULL END
+                        WHERE is_active = 1
+                    ''')
+                    
+                    conn.commit()
+                    conn.close()
+                    break  # Success, exit retry loop
+                    
+            except Exception as e:
+                if "locked" in str(e).lower() and attempt < max_retries - 1:
+                    print(f"⚠️ Database locked, retry {attempt + 1}/{max_retries}")
+                    time_module.sleep(0.5)  # Wait before retry
+                else:
+                    raise
         
         add_log(f"Trade #{trade_id} marked as {outcome} (P&L: {pnl:+.2f})", "success" if outcome == 'WIN' else "warning")
         return jsonify({"status": "success", "outcome": outcome, "pnl": pnl})
@@ -1713,17 +1729,32 @@ def mark_trade_outcome(trade_id):
 def delete_trade(trade_id):
     """Delete a trade (user didn't take it)"""
     try:
-        from database import get_connection
+        from database import get_connection, db_lock
+        import time as time_module
         
-        conn = get_connection()
-        cursor = conn.cursor()
-        
-        # Delete the trade and its features
-        cursor.execute('DELETE FROM signal_features WHERE signal_id = ?', (trade_id,))
-        cursor.execute('DELETE FROM signal_recommendations WHERE id = ?', (trade_id,))
-        
-        conn.commit()
-        conn.close()
+        # Use database lock with retry logic
+        max_retries = 3
+        for attempt in range(max_retries):
+            try:
+                with db_lock:
+                    conn = get_connection()
+                    conn.execute("PRAGMA busy_timeout = 5000")
+                    cursor = conn.cursor()
+                    
+                    # Delete the trade and its features
+                    cursor.execute('DELETE FROM signal_features WHERE signal_id = ?', (trade_id,))
+                    cursor.execute('DELETE FROM signal_recommendations WHERE id = ?', (trade_id,))
+                    
+                    conn.commit()
+                    conn.close()
+                    break  # Success
+                    
+            except Exception as e:
+                if "locked" in str(e).lower() and attempt < max_retries - 1:
+                    print(f"⚠️ Database locked, retry {attempt + 1}/{max_retries}")
+                    time_module.sleep(0.5)
+                else:
+                    raise
         
         add_log(f"Trade #{trade_id} deleted", "info")
         return jsonify({"status": "success", "message": f"Trade #{trade_id} deleted"})
