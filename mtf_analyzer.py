@@ -185,6 +185,72 @@ class MTFAnalyzer:
         
         return direction, strength, details
     
+    def generate_written_analysis(self, timeframe, direction, strength, details, candles):
+        """
+        Generate human-readable written analysis for a timeframe
+        Like: "The 15m chart shows a strong sustained uptrend with price maintaining higher lows..."
+        """
+        if not candles or len(candles) < 3:
+            return f"The {timeframe} chart has insufficient data for analysis."
+        
+        # Get price action details
+        change_pct = details.get('change_pct', 0)
+        hh = details.get('higher_highs', False)
+        hl = details.get('higher_lows', False)
+        lh = details.get('lower_highs', False)
+        ll = details.get('lower_lows', False)
+        high = details.get('high', 0)
+        low = details.get('low', 0)
+        last_close = details.get('last_close', 0)
+        
+        # Build descriptive text
+        if direction == 'bullish':
+            if strength == 'strong':
+                base = f"The {timeframe} chart shows a strong sustained uptrend"
+                if hh and hl:
+                    base += ", with price consistently making higher highs and higher lows"
+                base += ", indicating strong bullish momentum."
+                
+                if change_pct > 0.1:
+                    base += f" Price has moved up {abs(change_pct):.2f}% during this period."
+                
+            elif strength == 'moderate':
+                base = f"The {timeframe} chart confirms bullish momentum"
+                if hl:
+                    base += ", forming higher lows"
+                base += ". The current price action appears to be consolidating within this uptrend"
+                base += ", suggesting imminent continuation."
+                
+            else:  # weak
+                base = f"The {timeframe} chart displays a mild bullish bias"
+                base += ", though momentum appears weak. Caution advised as trend may be losing steam."
+                
+        elif direction == 'bearish':
+            if strength == 'strong':
+                base = f"The {timeframe} chart shows a strong sustained downtrend"
+                if lh and ll:
+                    base += ", with price consistently making lower highs and lower lows"
+                base += ", indicating strong bearish momentum."
+                
+                if change_pct < -0.1:
+                    base += f" Price has declined {abs(change_pct):.2f}% during this period."
+                    
+            elif strength == 'moderate':
+                base = f"The {timeframe} chart confirms bearish momentum"
+                if lh:
+                    base += ", forming lower highs"
+                base += ". The current price action suggests continuation of the downtrend."
+                
+            else:  # weak
+                base = f"The {timeframe} chart displays a mild bearish bias"
+                base += ", though momentum appears weak. Watch for potential reversal."
+                
+        else:  # neutral
+            base = f"The {timeframe} chart shows choppy, sideways price action"
+            base += " with no clear directional bias. Consider waiting for a clearer setup."
+        
+        return base
+    
     def analyze_structure(self, candles):
         """
         Analyze market structure cleanliness
@@ -412,14 +478,26 @@ class MTFAnalyzer:
         tf5_dir, tf5_str, tf5_details = self.analyze_trend(candles_5m)
         tf1_dir, tf1_str, tf1_details = self.analyze_trend(candles_1m)
         
+        # Generate written analysis for each timeframe
+        tf15_analysis = self.generate_written_analysis('15m', tf15_dir, tf15_str, tf15_details, candles_15m)
+        tf5_analysis = self.generate_written_analysis('5m', tf5_dir, tf5_str, tf5_details, candles_5m)
+        tf1_analysis = self.generate_written_analysis('1m', tf1_dir, tf1_str, tf1_details, candles_1m)
+        
         # Always populate timeframe data (so it's available even for STAY_AWAY)
         result['components']['timeframe'] = {
             'score': 0,
             'weight': self.WEIGHT_TF_ALIGNMENT,
             'alignment': 'none',
-            'tf15': {'direction': tf15_dir, 'strength': tf15_str},
-            'tf5': {'direction': tf5_dir, 'strength': tf5_str},
-            'tf1': {'direction': tf1_dir, 'strength': tf1_str}
+            'tf15': {'direction': tf15_dir, 'strength': tf15_str, 'analysis': tf15_analysis},
+            'tf5': {'direction': tf5_dir, 'strength': tf5_str, 'analysis': tf5_analysis},
+            'tf1': {'direction': tf1_dir, 'strength': tf1_str, 'analysis': tf1_analysis}
+        }
+        
+        # Store written analysis at top level for easy access
+        result['mtf_analysis'] = {
+            '15m': tf15_analysis,
+            '5m': tf5_analysis,
+            '1m': tf1_analysis
         }
         
         # Check 15m backbone - if unclear, STAY AWAY
@@ -573,16 +651,38 @@ class MTFAnalyzer:
             
             if bias == 'LONG':
                 result['stop'] = stop if stop else round(current_price - stop_distance, 2)
-                # Target = Entry + (2 × stop distance) for exact 2:1 R:R
                 actual_stop_dist = abs(current_price - result['stop'])
-                result['target'] = round(current_price + (actual_stop_dist * TARGET_RR), 2)
+                
+                # Multiple profit targets
+                result['target1'] = round(current_price + (actual_stop_dist * 1.5), 2)  # 1.5:1 R:R
+                result['target2'] = round(current_price + (actual_stop_dist * 2.0), 2)  # 2.0:1 R:R
+                result['target'] = result['target2']  # Primary target is 2:1
+                
+                # Calculate pips/points from entry
+                result['target1_pips'] = round(actual_stop_dist * 1.5, 2)
+                result['target2_pips'] = round(actual_stop_dist * 2.0, 2)
+                result['stop_pips'] = round(actual_stop_dist, 2)
+                
             else:  # SHORT
                 result['stop'] = stop if stop else round(current_price + stop_distance, 2)
                 actual_stop_dist = abs(result['stop'] - current_price)
-                result['target'] = round(current_price - (actual_stop_dist * TARGET_RR), 2)
+                
+                # Multiple profit targets
+                result['target1'] = round(current_price - (actual_stop_dist * 1.5), 2)  # 1.5:1 R:R
+                result['target2'] = round(current_price - (actual_stop_dist * 2.0), 2)  # 2.0:1 R:R
+                result['target'] = result['target2']  # Primary target is 2:1
+                
+                # Calculate pips/points from entry
+                result['target1_pips'] = round(actual_stop_dist * 1.5, 2)
+                result['target2_pips'] = round(actual_stop_dist * 2.0, 2)
+                result['stop_pips'] = round(actual_stop_dist, 2)
             
-            # R:R is now exactly 2:1
+            # R:R info
             result['risk_reward'] = TARGET_RR
+            result['targets'] = {
+                'target1': {'price': result['target1'], 'rr': 1.5, 'pips': result['target1_pips']},
+                'target2': {'price': result['target2'], 'rr': 2.0, 'pips': result['target2_pips']}
+            }
             
             # ========== POSITION SIZING ($250 risk) ==========
             position = calculate_position_size(ticker, result['entry'], result['stop'])

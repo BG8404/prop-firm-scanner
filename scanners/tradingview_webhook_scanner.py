@@ -106,7 +106,7 @@ DISCORD_WEBHOOK_URL = os.environ.get("DISCORD_WEBHOOK_URL", "")
 def send_discord_alert(ticker, signal, analysis_details=None):
     """
     Send trade signal alert to Discord - SignalCrawler v2.0
-    Now includes daily bias and key levels
+    Enhanced format with written MTF analysis and multiple profit targets
     """
     if not DISCORD_WEBHOOK_URL:
         print("⚠️ Discord webhook not configured")
@@ -125,73 +125,86 @@ def send_discord_alert(ticker, signal, analysis_details=None):
         market_lvls = get_market_levels()
         levels_info = market_lvls.get_all_levels(ticker, entry)
         bias_info = levels_info.get('bias', {})
-        orb = levels_info.get('orb', {})
-        pdh_pdl = levels_info.get('pdh_pdl', {})
         
-        # Calculate R:R
-        if direction == 'LONG' and entry and stop and target:
-            risk = abs(entry - stop)
-            reward = abs(target - entry)
-            rr = round(reward / risk, 1) if risk > 0 else 0
-        elif direction == 'SHORT' and entry and stop and target:
-            risk = abs(stop - entry)
-            reward = abs(entry - target)
-            rr = round(reward / risk, 1) if risk > 0 else 0
-        else:
-            rr = 0
+        # Calculate stop distance for pips display
+        stop_pips = abs(entry - stop) if entry and stop else 0
         
         # Emoji based on direction
         if direction == 'LONG':
             emoji = "🟢"
-            color = 0x00ff00  # Green
+            color = 0x1a472a  # Dark green (like screenshot)
         elif direction == 'SHORT':
             emoji = "🔴"
-            color = 0xff0000  # Red
-        elif 'REJECT' in direction:
-            emoji = "⚠️"
-            color = 0xffa500  # Orange
+            color = 0x8b0000  # Dark red
         else:
             emoji = "⚪"
-            color = 0x808080  # Gray
+            color = 0x2f3136  # Discord dark
         
-        # Daily bias emoji
-        bias = bias_info.get('bias', 'UNKNOWN')
-        bias_emoji = '🟢' if bias == 'LONG' else '🔴' if bias == 'SHORT' else '⚪'
+        # Get analysis data
+        mtf_analysis = {}
+        target1 = None
+        target2 = None
+        target1_pips = 0
+        target2_pips = 0
         
-        # Get timeframe trends from analysis
-        tf15_trend = '?'
-        tf5_trend = '?'
-        tf1_trend = '?'
         if analysis_details:
-            tf_data = analysis_details.get('components', {}).get('timeframe', {})
-            tf15_trend = tf_data.get('tf15', {}).get('direction', '?')
-            tf5_trend = tf_data.get('tf5', {}).get('direction', '?')
-            tf1_trend = tf_data.get('tf1', {}).get('direction', '?')
+            mtf_analysis = analysis_details.get('mtf_analysis', {})
+            target1 = analysis_details.get('target1')
+            target2 = analysis_details.get('target2')
+            target1_pips = analysis_details.get('target1_pips', 0)
+            target2_pips = analysis_details.get('target2_pips', 0)
         
-        def trend_emoji(t):
-            if t == 'bullish': return '🟢'
-            if t == 'bearish': return '🔴'
-            return '⚪'
+        # Build the TRADE SETUP section
+        trade_setup = f"**Direction:** {direction}\n"
+        trade_setup += f"**Confidence Level:** {confidence}%"
         
-        # Build Discord embed with v2.0 format
+        # Build Entry Strategy section
+        entry_strategy = f"• **Entry Price:** {entry:.2f}\n"
+        entry_strategy += f"• **Stop Loss:** {stop:.2f} ({stop_pips:.1f} pts away)"
+        
+        # Build Profit Targets section
+        profit_targets = ""
+        if target1:
+            profit_targets += f"• **Target 1:** {target1:.2f} ({target1_pips:.1f} pts, 1:1.50 R:R)\n"
+        if target2:
+            profit_targets += f"• **Target 2:** {target2:.2f} ({target2_pips:.1f} pts, 1:2.00 R:R)"
+        else:
+            profit_targets = f"• **Target:** {target:.2f} (2:1 R:R)"
+        
+        # Build MTF Analysis section (written text like the screenshot)
+        mtf_text = ""
+        if mtf_analysis:
+            if mtf_analysis.get('15m'):
+                mtf_text += f"**15m Chart:** {mtf_analysis['15m']}\n\n"
+            if mtf_analysis.get('5m'):
+                mtf_text += f"**5m Chart:** {mtf_analysis['5m']}\n\n"
+            if mtf_analysis.get('1m'):
+                mtf_text += f"**1m Chart:** {mtf_analysis['1m']}"
+        else:
+            mtf_text = "Analysis data not available"
+        
+        # Truncate MTF text if too long (Discord limit)
+        if len(mtf_text) > 1000:
+            mtf_text = mtf_text[:997] + "..."
+        
+        # Build Discord embed with new format (like screenshot)
         embed = {
-            "title": f"{emoji} SignalCrawler v2.0 - {ticker}",
+            "title": f"{emoji} TRADE SETUP - {ticker}",
             "color": color,
             "fields": [
-                # Timeframe Trends (15m, 5m, 1m)
-                {"name": "📊 Timeframe Trends", "value": f"{trend_emoji(tf15_trend)} 15m: **{tf15_trend.upper()}**  |  {trend_emoji(tf5_trend)} 5m: **{tf5_trend.upper()}**  |  {trend_emoji(tf1_trend)} 1m: **{tf1_trend.upper()}**", "inline": False},
-                # Daily Bias (NEW)
-                {"name": f"{bias_emoji} Daily Bias", "value": f"**{bias}**\n{bias_info.get('reason', 'N/A')[:100]}", "inline": False},
-                # Key Levels (NEW)
-                {"name": "📊 Key Levels", "value": f"ORB: {orb.get('low', 'N/A'):.2f} - {orb.get('high', 'N/A'):.2f}\nPDH: {pdh_pdl.get('pdh', 'N/A') or 'N/A'}\nPDL: {pdh_pdl.get('pdl', 'N/A') or 'N/A'}" if orb.get('high') else "Levels not available", "inline": False},
-                # Signal details
-                {"name": f"{emoji} Signal", "value": f"**{direction}** @ {confidence}% confidence", "inline": True},
-                {"name": "📈 Entry", "value": f"{entry:.2f}" if entry else "N/A", "inline": True},
-                {"name": "🛑 Stop", "value": f"{stop:.2f}" if stop else "N/A", "inline": True},
-                {"name": "🎯 Target", "value": f"{target:.2f}" if target else "N/A", "inline": True},
-                {"name": "⚖️ R:R", "value": f"{rr}:1" if rr else "N/A", "inline": True},
+                # Trade Setup
+                {"name": "📋 TRADE SETUP", "value": trade_setup, "inline": False},
+                
+                # Entry Strategy
+                {"name": "🎯 Entry Strategy", "value": entry_strategy, "inline": False},
+                
+                # Profit Targets
+                {"name": "💰 Profit Targets", "value": profit_targets, "inline": False},
+                
+                # Multi-Timeframe Analysis (written text)
+                {"name": "📊 Multi-Timeframe Analysis", "value": mtf_text, "inline": False},
             ],
-            "footer": {"text": "SignalCrawler v2.0 • 80%+ • $250 Risk • 2:1 R:R"},
+            "footer": {"text": f"SignalCrawler v2.0 • {confidence}% Confidence • $250 Risk"},
             "timestamp": dt.datetime.now().isoformat()
         }
         
@@ -203,25 +216,10 @@ def send_discord_alert(ticker, signal, analysis_details=None):
                 actual_risk = position.get('actual_risk', 250)
                 potential_profit = position.get('potential_profit', 500)
                 embed["fields"].append({
-                    "name": "📊 Position Size ($250 Risk)",
-                    "value": f"**{contracts} contracts**\nRisk: ${actual_risk:.0f} → Profit: ${potential_profit:.0f}",
+                    "name": "📊 Position Size",
+                    "value": f"**{contracts} contract(s)** @ $250 risk\nPotential Profit: ${potential_profit:.0f}",
                     "inline": False
                 })
-            
-            entry_instruction = analysis_details.get('entry_instruction', '')
-            if entry_instruction:
-                embed["fields"].append({
-                    "name": "📝 Entry Instructions",
-                    "value": entry_instruction[:400],
-                    "inline": False
-                })
-        
-        # Add ALL CRITERIA MET badge
-        embed["fields"].append({
-            "name": "✅ Status",
-            "value": "**ALL CRITERIA MET** - Trade Approved",
-            "inline": False
-        })
         
         # Send to Discord
         payload = {
@@ -345,11 +343,21 @@ MAX_TICKS = {
 # ====================================
 
 # ========= DATA STORAGE =========
-# Store recent candles in memory (last 100 1m, 50 5m, 30 15m)
+# Store recent candles in memory - INCREASED for longer-term analysis
+# 1m: 300 candles = 5 hours (full RTH session)
+# 5m: 100 candles = 8+ hours (full trading day)
+# 15m: 60 candles = 15 hours (day + overnight)
 candle_storage = {
     "1m": {},   # ticker -> deque of candles
     "5m": {},
     "15m": {}
+}
+
+# Storage limits per timeframe
+CANDLE_LIMITS = {
+    "1m": 300,
+    "5m": 100,
+    "15m": 60
 }
 
 # File for persisting candle history
@@ -403,7 +411,7 @@ def load_candle_history():
         for tf in ["1m", "5m", "15m"]:
                 candles = timeframes.get(tf, [])
                 if candles:
-                    maxlen = 100 if tf == "1m" else 50 if tf == "5m" else 30
+                    maxlen = CANDLE_LIMITS[tf]
                     
                     # Merge with existing if base ticker already has candles
                     if base_ticker in candle_storage[tf]:
@@ -434,11 +442,11 @@ def load_candle_history():
     
     return False
 
-# Initialize storage for each ticker
+# Initialize storage for each ticker with new limits
 for ticker in ["MNQ", "MES", "MGC"]:
-    candle_storage["1m"][ticker] = deque(maxlen=100)
-    candle_storage["5m"][ticker] = deque(maxlen=50)
-    candle_storage["15m"][ticker] = deque(maxlen=30)
+    candle_storage["1m"][ticker] = deque(maxlen=CANDLE_LIMITS["1m"])  # 300 candles
+    candle_storage["5m"][ticker] = deque(maxlen=CANDLE_LIMITS["5m"])  # 100 candles
+    candle_storage["15m"][ticker] = deque(maxlen=CANDLE_LIMITS["15m"])  # 60 candles
 
 # Load history from previous session
 load_candle_history()
@@ -536,8 +544,7 @@ def store_candle(ticker, timeframe, candle_data):
     
     # Ensure ticker exists in storage
     if base_ticker not in candle_storage[timeframe]:
-        maxlen = 100 if timeframe == "1m" else 50 if timeframe == "5m" else 30
-        candle_storage[timeframe][base_ticker] = deque(maxlen=maxlen)
+        candle_storage[timeframe][base_ticker] = deque(maxlen=CANDLE_LIMITS[timeframe])
     
     candle_storage[timeframe][base_ticker].append(candle_data)
     print(f"  📊 Stored {timeframe} candle for {base_ticker} (total: {len(candle_storage[timeframe][base_ticker])})")
@@ -583,8 +590,7 @@ def build_aggregated_candles(ticker, candles_1m, period, target_tf):
     """
     # Ensure storage exists
     if ticker not in candle_storage[target_tf]:
-        maxlen = 50 if target_tf == "5m" else 30
-        candle_storage[target_tf][ticker] = deque(maxlen=maxlen)
+        candle_storage[target_tf][ticker] = deque(maxlen=CANDLE_LIMITS[target_tf])
     
     # Calculate how many complete periods we can build
     num_complete = len(candles_1m) // period
