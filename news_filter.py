@@ -84,10 +84,8 @@ SCHEDULED_EVENTS_2025 = [
 ]
 
 # Daily recurring danger times (high volatility periods)
-DAILY_DANGER_TIMES = [
-    # Market open volatility
-    (9, 30, 10, 0, "Market Open - High Volatility"),
-]
+# Note: Removed "Market Open" blocker - ORB filter already handles 9:30-10:00 AM
+DAILY_DANGER_TIMES = []
 
 
 def get_est_now():

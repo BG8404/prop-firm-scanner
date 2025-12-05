@@ -37,7 +37,8 @@ ORB_END = time(10, 0)  # Opening range ends at 10:00 AM
 MARKET_CLOSE = time(16, 0)
 
 # Default buffer from PDH/PDL (in points)
-DEFAULT_PDH_PDL_BUFFER = 15
+# Buffer from PDH/PDL levels (in points) - reduced from 15 to be less restrictive
+DEFAULT_PDH_PDL_BUFFER = 10
 
 
 class MarketLevels:
@@ -278,6 +279,12 @@ class MarketLevels:
         """
         Check if an entry is safe from PDH/PDL levels.
         
+        Logic:
+        - LONG above PDH = breakout (GOOD) ✅
+        - LONG below PDH but close = approaching resistance (risky) ❌
+        - SHORT below PDL = breakdown (GOOD) ✅
+        - SHORT above PDL but close = approaching support (risky) ❌
+        
         Returns: (is_safe, reason)
         """
         ticker = self._normalize_ticker(ticker)
@@ -294,17 +301,21 @@ class MarketLevels:
         dist_to_pdh = abs(entry_price - pdh)
         dist_to_pdl = abs(entry_price - pdl)
         
-        # Check if too close to levels
         if direction.upper() == 'LONG':
-            # For longs, PDH is resistance - don't enter too close to it
+            # If entry is ABOVE PDH = breakout - that's good!
+            if entry_price > pdh:
+                return True, f"✅ LONG breakout above PDH {pdh:.2f} (+{dist_to_pdh:.1f} pts)"
+            # If entry is BELOW PDH but close = approaching resistance (risky)
             if dist_to_pdh < self.pdh_pdl_buffer:
-                return False, f"❌ Entry {entry_price:.2f} too close to PDH {pdh:.2f} ({dist_to_pdh:.1f} pts < {self.pdh_pdl_buffer} buffer)"
-            # PDL should be support - entry above PDL is good
+                return False, f"❌ LONG entry {entry_price:.2f} approaching resistance PDH {pdh:.2f} ({dist_to_pdh:.1f} pts away)"
             return True, f"✅ Safe from PDH ({dist_to_pdh:.1f} pts away)"
         else:  # SHORT
-            # For shorts, PDL is support - don't short too close to it
+            # If entry is BELOW PDL = breakdown - that's good!
+            if entry_price < pdl:
+                return True, f"✅ SHORT breakdown below PDL {pdl:.2f} (-{dist_to_pdl:.1f} pts)"
+            # If entry is ABOVE PDL but close = approaching support (risky)
             if dist_to_pdl < self.pdh_pdl_buffer:
-                return False, f"❌ Entry {entry_price:.2f} too close to PDL {pdl:.2f} ({dist_to_pdl:.1f} pts < {self.pdh_pdl_buffer} buffer)"
+                return False, f"❌ SHORT entry {entry_price:.2f} approaching support PDL {pdl:.2f} ({dist_to_pdl:.1f} pts away)"
             return True, f"✅ Safe from PDL ({dist_to_pdl:.1f} pts away)"
     
     def check_bias_alignment(self, ticker, signal_direction, current_price=None):
