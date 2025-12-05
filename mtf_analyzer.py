@@ -412,6 +412,16 @@ class MTFAnalyzer:
         tf5_dir, tf5_str, tf5_details = self.analyze_trend(candles_5m)
         tf1_dir, tf1_str, tf1_details = self.analyze_trend(candles_1m)
         
+        # Always populate timeframe data (so it's available even for STAY_AWAY)
+        result['components']['timeframe'] = {
+            'score': 0,
+            'weight': self.WEIGHT_TF_ALIGNMENT,
+            'alignment': 'none',
+            'tf15': {'direction': tf15_dir, 'strength': tf15_str},
+            'tf5': {'direction': tf5_dir, 'strength': tf5_str},
+            'tf1': {'direction': tf1_dir, 'strength': tf1_str}
+        }
+        
         # Check 15m backbone - if unclear, STAY AWAY
         if tf15_dir == 'neutral' or tf15_str == 'weak':
             result['stay_away_reason'] = '15m chart unclear - backbone invalid'
@@ -448,14 +458,9 @@ class MTFAnalyzer:
             result['stay_away_reason'] = 'Timeframe breakdown - no alignment'
             return result
         
-        result['components']['timeframe'] = {
-            'score': tf_score,
-            'weight': self.WEIGHT_TF_ALIGNMENT,
-            'alignment': alignment,
-            'tf15': {'direction': tf15_dir, 'strength': tf15_str},
-            'tf5': {'direction': tf5_dir, 'strength': tf5_str},
-            'tf1': {'direction': tf1_dir, 'strength': tf1_str}
-        }
+        # Update timeframe data with alignment info (already have tf directions from early population)
+        result['components']['timeframe']['score'] = tf_score
+        result['components']['timeframe']['alignment'] = alignment
         
         # ========== 2. STRUCTURE ANALYSIS (25%) ==========
         struct_score_15, clean_15, issues_15 = self.analyze_structure(candles_15m)
