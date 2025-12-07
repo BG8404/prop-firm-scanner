@@ -1,66 +1,139 @@
 """
-SignalCrawler Multi-Timeframe Analyzer
-Advanced confidence scoring with 5 weighted components
+SignalCrawler v3.0 Multi-Timeframe Analyzer
+Advanced confidence scoring with time-tiered trading system
 
 CONFIDENCE SCORING:
-1. Timeframe Alignment    - 40% (Primary driver)
+1. Timeframe Alignment    - 40% (Primary driver - MUST be 3/3 unanimous)
 2. Market Structure       - 25% (Trend + liquidity clarity)
 3. Volume Confirmation    - 15% (Breakout/pullback validation)
-4. Risk/Reward Quality    - 10% (Min 1.5:1 required)
+4. Risk/Reward Quality    - 10% (Time-based targets)
 5. Catalysts & Volatility - 10% (News/time awareness)
 
 POSITION SIZING:
-- Fixed $250 risk per trade
-- Exact 2:1 R:R (target = 2× stop distance)
-- Calculate contracts based on tick value
+- Formula: Contracts = Risk ÷ (Stop_Ticks × Tick_Value)
+- Risk varies by tier: $250 PRIME, $175 MIDDAY, $125 EXTENDED
+- Stop capped at max per instrument: MNQ 15pts, MES 6pts, MGC 10pts
+
+TIME TIERS:
+- PRIME (9:30-11:30 AM): 80% min, 1.5:1/2:1 targets
+- MIDDAY (11:30-3:30 PM): 85% min, 1:1/1.5:1 targets
+- EXTENDED (5-9 PM, 6-9:30 AM): 90% min, 1:1/1.5:1 targets
+- BLOCKED (9 PM - 6 AM): No signals
 
 15m = Bias Engine (backbone - if unclear, STAY AWAY)
-5m  = Setup Quality Filter
-1m  = Execution Trigger
+5m  = Setup Quality Filter (must agree)
+1m  = Execution Trigger (must agree)
 """
 
 from datetime import datetime
 import statistics
+import re
 
-# Position sizing configuration
-RISK_PER_TRADE = 250  # $250 risk per trade
-TARGET_RR = 2.0       # Exact 2:1 risk/reward
+# Import time tier configuration
+try:
+    from time_tiers import (
+        get_current_tier, is_trading_blocked, get_tier_targets,
+        get_tier_risk, get_tier_confidence_threshold, get_extended_hours_warning,
+        get_tier_name, get_tier_emoji, get_session_window
+    )
+    TIME_TIERS_AVAILABLE = True
+except ImportError:
+    TIME_TIERS_AVAILABLE = False
+    print("⚠️ time_tiers.py not found - using defaults")
 
-# Tick values per contract (how much $1 move = in dollars)
+# ============================================
+# TICKER CONFIGURATION
+# ============================================
+
+# Tick values per contract
 TICK_VALUES = {
-    'MNQ': {'tick_size': 0.25, 'tick_value': 0.50},   # Micro Nasdaq: $0.50 per tick
-    'MES': {'tick_size': 0.25, 'tick_value': 1.25},   # Micro S&P: $1.25 per tick  
-    'MGC': {'tick_size': 0.10, 'tick_value': 1.00},   # Micro Gold: $1.00 per tick
-    'NQ':  {'tick_size': 0.25, 'tick_value': 5.00},   # E-mini Nasdaq
-    'ES':  {'tick_size': 0.25, 'tick_value': 12.50},  # E-mini S&P
-    'GC':  {'tick_size': 0.10, 'tick_value': 10.00},  # Gold futures
+    'MNQ': {'tick_size': 0.25, 'tick_value': 0.50, 'max_stop_points': 15},
+    'MES': {'tick_size': 0.25, 'tick_value': 1.25, 'max_stop_points': 6},
+    'MGC': {'tick_size': 0.10, 'tick_value': 1.00, 'max_stop_points': 10},
+    'NQ':  {'tick_size': 0.25, 'tick_value': 5.00, 'max_stop_points': 15},
+    'ES':  {'tick_size': 0.25, 'tick_value': 12.50, 'max_stop_points': 6},
+    'GC':  {'tick_size': 0.10, 'tick_value': 10.00, 'max_stop_points': 10},
 }
 
-def calculate_position_size(ticker, entry, stop):
+# Default fallback values
+DEFAULT_RISK = 250
+DEFAULT_TARGET1_RR = 1.5
+DEFAULT_TARGET2_RR = 2.0
+
+
+def get_base_ticker(ticker):
+    """Extract base ticker from contract symbol (MNQZ2025 -> MNQ)"""
+    base = ticker.replace('=F', '').upper()
+    # Strip contract month codes (F,G,H,J,K,M,N,Q,U,V,X,Z followed by 4 digits)
+    base = re.sub(r'[FGHJKMNQUVXZ]\d{4}$', '', base)
+    return base
+
+
+def get_ticker_info(ticker):
+    """Get tick info for a ticker"""
+    base = get_base_ticker(ticker)
+    return TICK_VALUES.get(base, TICK_VALUES.get('MNQ'))
+
+
+def cap_stop_loss(ticker, entry, calculated_stop, direction):
     """
-    Calculate position size for $250 risk
-    Returns: contracts, risk_per_contract, potential_profit
-    """
-    # Get tick info for ticker
-    base_ticker = ticker.replace('=F', '').upper()
-    # Strip contract month (MNQZ2025 -> MNQ)
-    import re
-    base_ticker = re.sub(r'[FGHJKMNQUVXZ]\d{4}$', '', base_ticker)
+    Cap stop loss at instrument maximum.
     
-    tick_info = TICK_VALUES.get(base_ticker, TICK_VALUES.get('MNQ'))  # Default to MNQ
-    tick_size = tick_info['tick_size']
-    tick_value = tick_info['tick_value']
+    Returns:
+        tuple: (capped_stop, was_capped, stop_distance_points)
+    """
+    info = get_ticker_info(ticker)
+    max_stop = info.get('max_stop_points', 15)
+    
+    stop_distance = abs(entry - calculated_stop)
+    
+    if stop_distance > max_stop:
+        # Cap at maximum
+        if direction == 'LONG':
+            capped_stop = entry - max_stop
+        else:
+            capped_stop = entry + max_stop
+        return round(capped_stop, 2), True, max_stop
+    
+    return calculated_stop, False, round(stop_distance, 2)
+
+
+def calculate_position_size(ticker, entry, stop, risk_amount=None):
+    """
+    Calculate position size using correct formula:
+    Contracts = Risk ÷ (Stop_Ticks × Tick_Value)
+    
+    Args:
+        ticker: Ticker symbol
+        entry: Entry price
+        stop: Stop price
+        risk_amount: Risk per trade (uses tier-based if not specified)
+    
+    Returns:
+        dict with position sizing details
+    """
+    # Get tier-based risk if not specified
+    if risk_amount is None:
+        if TIME_TIERS_AVAILABLE:
+            risk_amount = get_tier_risk()
+        else:
+            risk_amount = DEFAULT_RISK
+    
+    # Get tick info
+    info = get_ticker_info(ticker)
+    tick_size = info['tick_size']
+    tick_value = info['tick_value']
     
     # Calculate stop distance in ticks
-    stop_distance = abs(entry - stop)
-    ticks_to_stop = stop_distance / tick_size
+    stop_distance_points = abs(entry - stop)
+    ticks_to_stop = stop_distance_points / tick_size
     
-    # Risk per contract
+    # Risk per contract = ticks × tick value
     risk_per_contract = ticks_to_stop * tick_value
     
-    # Contracts needed for $250 risk
+    # Contracts = Risk ÷ Risk per contract
     if risk_per_contract > 0:
-        contracts = int(RISK_PER_TRADE / risk_per_contract)
+        contracts = int(risk_amount / risk_per_contract)
         contracts = max(1, contracts)  # Minimum 1 contract
     else:
         contracts = 1
@@ -68,21 +141,22 @@ def calculate_position_size(ticker, entry, stop):
     # Actual risk with this position
     actual_risk = contracts * risk_per_contract
     
-    # Potential profit at 2:1
-    potential_profit = actual_risk * TARGET_RR
-    
     return {
         'contracts': contracts,
         'risk_per_contract': round(risk_per_contract, 2),
         'actual_risk': round(actual_risk, 2),
-        'potential_profit': round(potential_profit, 2),
-        'ticks_to_stop': round(ticks_to_stop, 1)
+        'suggested_risk': risk_amount,
+        'ticks_to_stop': round(ticks_to_stop, 1),
+        'stop_distance_points': round(stop_distance_points, 2),
+        'tick_value': tick_value,
+        'tick_size': tick_size
     }
 
 
 class MTFAnalyzer:
     """
-    SignalCrawler Multi-Timeframe Analyzer
+    SignalCrawler v3.0 Multi-Timeframe Analyzer
+    Requires UNANIMOUS 3/3 timeframe alignment
     """
     
     # Confidence weights
@@ -93,7 +167,7 @@ class MTFAnalyzer:
     WEIGHT_CATALYSTS = 10
     
     # Minimum R:R threshold
-    MIN_RISK_REWARD = 1.5
+    MIN_RISK_REWARD = 1.0  # Lowered since targets are tier-based
     
     def __init__(self):
         pass
@@ -188,7 +262,6 @@ class MTFAnalyzer:
     def generate_written_analysis(self, timeframe, direction, strength, details, candles):
         """
         Generate human-readable written analysis for a timeframe
-        Like: "The 15m chart shows a strong sustained uptrend with price maintaining higher lows..."
         """
         if not candles or len(candles) < 3:
             return f"The {timeframe} chart has insufficient data for analysis."
@@ -199,55 +272,34 @@ class MTFAnalyzer:
         hl = details.get('higher_lows', False)
         lh = details.get('lower_highs', False)
         ll = details.get('lower_lows', False)
-        high = details.get('high', 0)
-        low = details.get('low', 0)
-        last_close = details.get('last_close', 0)
         
         # Build descriptive text
         if direction == 'bullish':
             if strength == 'strong':
-                base = f"The {timeframe} chart shows a strong sustained uptrend"
+                base = f"Strong bullish momentum"
                 if hh and hl:
-                    base += ", with price consistently making higher highs and higher lows"
-                base += ", indicating strong bullish momentum."
-                
-                if change_pct > 0.1:
-                    base += f" Price has moved up {abs(change_pct):.2f}% during this period."
-                
+                    base += ", making higher highs and higher lows"
             elif strength == 'moderate':
-                base = f"The {timeframe} chart confirms bullish momentum"
+                base = f"Bullish momentum confirmed"
                 if hl:
                     base += ", forming higher lows"
-                base += ". The current price action appears to be consolidating within this uptrend"
-                base += ", suggesting imminent continuation."
-                
             else:  # weak
-                base = f"The {timeframe} chart displays a mild bullish bias"
-                base += ", though momentum appears weak. Caution advised as trend may be losing steam."
+                base = f"Mild bullish bias, weak momentum"
                 
         elif direction == 'bearish':
             if strength == 'strong':
-                base = f"The {timeframe} chart shows a strong sustained downtrend"
+                base = f"Strong bearish momentum"
                 if lh and ll:
-                    base += ", with price consistently making lower highs and lower lows"
-                base += ", indicating strong bearish momentum."
-                
-                if change_pct < -0.1:
-                    base += f" Price has declined {abs(change_pct):.2f}% during this period."
-                    
+                    base += ", making lower highs and lower lows"
             elif strength == 'moderate':
-                base = f"The {timeframe} chart confirms bearish momentum"
+                base = f"Bearish momentum confirmed"
                 if lh:
                     base += ", forming lower highs"
-                base += ". The current price action suggests continuation of the downtrend."
-                
             else:  # weak
-                base = f"The {timeframe} chart displays a mild bearish bias"
-                base += ", though momentum appears weak. Watch for potential reversal."
+                base = f"Mild bearish bias, weak momentum"
                 
         else:  # neutral
-            base = f"The {timeframe} chart shows choppy, sideways price action"
-            base += " with no clear directional bias. Consider waiting for a clearer setup."
+            base = f"Choppy/sideways - no clear direction"
         
         return base
     
@@ -264,8 +316,6 @@ class MTFAnalyzer:
         
         highs = [c.get('high', 0) for c in candles]
         lows = [c.get('low', 0) for c in candles]
-        closes = [c.get('close', 0) for c in candles]
-        opens = [c.get('open', 0) for c in candles]
         
         # Check for overlapping highs/lows (chop)
         avg_range = statistics.mean([h - l for h, l in zip(highs, lows)])
@@ -276,7 +326,6 @@ class MTFAnalyzer:
             prev_low, prev_high = lows[i-1], highs[i-1]
             curr_low, curr_high = lows[i], highs[i]
             
-            # Check if candles overlap significantly
             overlap = min(prev_high, curr_high) - max(prev_low, curr_low)
             if overlap > avg_range * 0.5:
                 overlaps += 1
@@ -290,7 +339,7 @@ class MTFAnalyzer:
             score -= 15
             issues.append('Moderate overlap')
         
-        # Check for wick dominance (manipulation risk)
+        # Check for wick dominance
         wick_dominated = 0
         for c in candles:
             body = abs(c.get('close', 0) - c.get('open', 0))
@@ -306,7 +355,7 @@ class MTFAnalyzer:
             score -= 10
             issues.append('Some wick dominance')
         
-        # Check for clear structure (HH/HL or LH/LL)
+        # Check for clear structure
         direction, strength, _ = self.analyze_trend(candles)
         if strength == 'weak':
             score -= 15
@@ -331,7 +380,6 @@ class MTFAnalyzer:
         
         score = 75  # Base score
         
-        # Check if volume is increasing with trend
         direction, _, _ = self.analyze_trend(candles)
         
         recent_vol = volumes[-3:] if len(volumes) >= 3 else volumes
@@ -349,7 +397,6 @@ class MTFAnalyzer:
             'trend_direction': direction
         }
         
-        # Volume should increase with trend moves
         if direction in ('bullish', 'bearish'):
             if vol_change > 20:
                 score += 25
@@ -372,46 +419,26 @@ class MTFAnalyzer:
     def check_catalyst_risk(self):
         """
         Check for catalyst/volatility danger zones
-        Returns: score (0-100), is_safe (bool), warnings (list)
+        Uses time tiers if available
         """
+        # Check if trading is blocked (overnight)
+        if TIME_TIERS_AVAILABLE:
+            blocked, msg = is_trading_blocked()
+            if blocked:
+                return 0, False, [f'⛔ {msg}']
+        
         now = datetime.now()
         hour = now.hour
-        minute = now.minute
-        weekday = now.weekday()  # 0=Monday, 6=Sunday
+        weekday = now.weekday()
         
         warnings = []
         score = 100
         
-        # Weekend - no trading
+        # Weekend
         if weekday >= 5:
             return 0, False, ['Weekend - markets closed']
         
-        # Pre-market (before 9:30 ET)
-        if hour < 9 or (hour == 9 and minute < 30):
-            score -= 20
-            warnings.append('Pre-market session')
-        
-        # Market open volatility (9:30-10:00)
-        if hour == 9 and minute >= 30:
-            score -= 15
-            warnings.append('Market open volatility window')
-        
-        # Lunch chop (12:00-13:30)
-        if 12 <= hour < 14:
-            score -= 20
-            warnings.append('Lunch hour - typically choppy')
-        
-        # Power hour (15:00-16:00) - can be volatile
-        if hour == 15:
-            score -= 10
-            warnings.append('Power hour - increased volatility')
-        
-        # After hours
-        if hour >= 16:
-            score -= 30
-            warnings.append('After hours - low liquidity')
-        
-        # Best trading windows (10:00-11:30 and 14:00-15:00)
+        # Best trading windows
         if (10 <= hour < 12) or (14 <= hour < 15):
             score = min(100, score + 10)
         
@@ -422,7 +449,6 @@ class MTFAnalyzer:
     def calculate_risk_reward(self, entry, stop, target, direction):
         """
         Calculate risk:reward ratio
-        Returns: ratio (float), is_valid (bool), score (0-100)
         """
         if not all([entry, stop, target]):
             return 0, False, 0
@@ -430,7 +456,7 @@ class MTFAnalyzer:
         if direction.lower() == 'long':
             risk = abs(entry - stop)
             reward = abs(target - entry)
-        else:  # short
+        else:
             risk = abs(stop - entry)
             reward = abs(entry - target)
         
@@ -440,18 +466,14 @@ class MTFAnalyzer:
         ratio = reward / risk
         
         # Score based on R:R
-        if ratio >= 3.0:
+        if ratio >= 2.0:
             score = 100
-        elif ratio >= 2.5:
-            score = 90
-        elif ratio >= 2.0:
-            score = 80
         elif ratio >= 1.5:
-            score = 60
+            score = 80
         elif ratio >= 1.0:
-            score = 30
+            score = 60
         else:
-            score = 0
+            score = 30
         
         is_valid = ratio >= self.MIN_RISK_REWARD
         
@@ -461,8 +483,8 @@ class MTFAnalyzer:
     
     def full_analysis(self, candles_15m, candles_5m, candles_1m, entry=None, stop=None, target=None, ticker='MNQ'):
         """
-        Full QuantCrawler analysis across all timeframes
-        Returns comprehensive analysis with confidence score
+        Full SignalCrawler v3.0 analysis across all timeframes
+        REQUIRES UNANIMOUS 3/3 ALIGNMENT - no conditional signals
         """
         result = {
             'direction': 'STAY_AWAY',
@@ -470,20 +492,42 @@ class MTFAnalyzer:
             'signal_type': 'NO_TRADE',
             'components': {},
             'warnings': [],
-            'stay_away_reason': None
+            'stay_away_reason': None,
+            'tier': None,
+            'tier_name': None,
+            'tier_emoji': None,
+            'session_window': None
         }
+        
+        # ========== CHECK TIME TIER ==========
+        if TIME_TIERS_AVAILABLE:
+            tier = get_current_tier()
+            result['tier'] = tier
+            result['tier_name'] = get_tier_name()
+            result['tier_emoji'] = get_tier_emoji()
+            result['session_window'] = get_session_window()
+            result['suggested_risk'] = get_tier_risk()
+            
+            # Check if trading is blocked
+            blocked, msg = is_trading_blocked()
+            if blocked:
+                result['stay_away_reason'] = msg
+                result['warnings'].append('⛔ Trading blocked during overnight hours (9 PM - 6 AM)')
+                return result
+        else:
+            result['suggested_risk'] = DEFAULT_RISK
         
         # ========== 1. TIMEFRAME ANALYSIS (40%) ==========
         tf15_dir, tf15_str, tf15_details = self.analyze_trend(candles_15m)
         tf5_dir, tf5_str, tf5_details = self.analyze_trend(candles_5m)
         tf1_dir, tf1_str, tf1_details = self.analyze_trend(candles_1m)
         
-        # Generate written analysis for each timeframe
+        # Generate written analysis
         tf15_analysis = self.generate_written_analysis('15m', tf15_dir, tf15_str, tf15_details, candles_15m)
         tf5_analysis = self.generate_written_analysis('5m', tf5_dir, tf5_str, tf5_details, candles_5m)
         tf1_analysis = self.generate_written_analysis('1m', tf1_dir, tf1_str, tf1_details, candles_1m)
         
-        # Always populate timeframe data (so it's available even for STAY_AWAY)
+        # Always populate timeframe data
         result['components']['timeframe'] = {
             'score': 0,
             'weight': self.WEIGHT_TF_ALIGNMENT,
@@ -493,25 +537,36 @@ class MTFAnalyzer:
             'tf1': {'direction': tf1_dir, 'strength': tf1_str, 'analysis': tf1_analysis}
         }
         
-        # Store written analysis at top level for easy access
         result['mtf_analysis'] = {
             '15m': tf15_analysis,
             '5m': tf5_analysis,
             '1m': tf1_analysis
         }
         
-        # Check 15m backbone - if unclear, STAY AWAY
-        if tf15_dir == 'neutral' or tf15_str == 'weak':
-            result['stay_away_reason'] = '15m chart unclear - backbone invalid'
-            result['warnings'].append('15m timeframe is choppy/unclear')
+        # ========== v3.0: STRICT ALIGNMENT REQUIREMENTS ==========
+        
+        # Check 1: 15m backbone must be clear
+        if tf15_dir == 'neutral':
+            result['stay_away_reason'] = '15m chart unclear - no directional bias'
+            result['warnings'].append('15m timeframe is neutral/choppy')
             return result
         
-        # Count alignments
+        # Check 2: 15m and 5m must NOT be weak (higher timeframes need conviction)
+        if tf15_str == 'weak':
+            result['stay_away_reason'] = '15m momentum too weak - backbone invalid'
+            result['warnings'].append('15m shows weak momentum - waiting for strength')
+            return result
+        
+        if tf5_str == 'weak':
+            result['stay_away_reason'] = '5m momentum too weak - no setup quality'
+            result['warnings'].append('5m shows weak momentum - caution advised')
+            return result
+        
+        # Check 3: UNANIMOUS 3/3 alignment required (no 2/3 conditional signals)
         directions = [tf15_dir, tf5_dir, tf1_dir]
         bullish_count = directions.count('bullish')
         bearish_count = directions.count('bearish')
         
-        # Determine alignment
         if bullish_count == 3:
             alignment = 'full'
             bias = 'LONG'
@@ -520,23 +575,21 @@ class MTFAnalyzer:
             alignment = 'full'
             bias = 'SHORT'
             tf_score = 40
-        elif bullish_count == 2:
-            alignment = 'conditional'
-            bias = 'LONG'
-            tf_score = 25  # Reduced for 2/3
-            diverging = 'tf1' if tf1_dir != 'bullish' else ('tf5' if tf5_dir != 'bullish' else 'tf15')
-            result['warnings'].append(f'Conditional read: {diverging} diverging')
-        elif bearish_count == 2:
-            alignment = 'conditional'
-            bias = 'SHORT'
-            tf_score = 25
-            diverging = 'tf1' if tf1_dir != 'bearish' else ('tf5' if tf5_dir != 'bearish' else 'tf15')
-            result['warnings'].append(f'Conditional read: {diverging} diverging')
         else:
-            result['stay_away_reason'] = 'Timeframe breakdown - no alignment'
+            # v3.0: NO 2/3 signals - must be unanimous
+            conflicting = []
+            if tf15_dir != tf5_dir:
+                conflicting.append(f"15m={tf15_dir} vs 5m={tf5_dir}")
+            if tf5_dir != tf1_dir:
+                conflicting.append(f"5m={tf5_dir} vs 1m={tf1_dir}")
+            if tf15_dir != tf1_dir:
+                conflicting.append(f"15m={tf15_dir} vs 1m={tf1_dir}")
+            
+            result['stay_away_reason'] = f'MTF Conflict - All 3 timeframes must agree ({", ".join(conflicting)})'
+            result['warnings'].append('Timeframes not aligned - waiting for unanimous agreement')
             return result
         
-        # Update timeframe data with alignment info (already have tf directions from early population)
+        # Update timeframe score
         result['components']['timeframe']['score'] = tf_score
         result['components']['timeframe']['alignment'] = alignment
         
@@ -544,7 +597,6 @@ class MTFAnalyzer:
         struct_score_15, clean_15, issues_15 = self.analyze_structure(candles_15m)
         struct_score_5, clean_5, issues_5 = self.analyze_structure(candles_5m)
         
-        # Weight 15m structure more heavily
         structure_score = (struct_score_15 * 0.6 + struct_score_5 * 0.4)
         structure_weighted = (structure_score / 100) * self.WEIGHT_STRUCTURE
         
@@ -576,30 +628,7 @@ class MTFAnalyzer:
             'details': vol_details
         }
         
-        # ========== 4. RISK/REWARD (10%) ==========
-        if entry and stop and target:
-            rr_ratio, rr_valid, rr_score = self.calculate_risk_reward(entry, stop, target, bias)
-            
-            if not rr_valid:
-                result['stay_away_reason'] = f'Invalid R:R ({rr_ratio}:1 < {self.MIN_RISK_REWARD}:1 minimum)'
-                return result
-            
-            rr_weighted = (rr_score / 100) * self.WEIGHT_RISK_REWARD
-        else:
-            rr_ratio = 0
-            rr_score = 50  # Neutral if not provided
-            rr_weighted = 5
-            rr_valid = True
-        
-        result['components']['risk_reward'] = {
-            'score': rr_score,
-            'weight': self.WEIGHT_RISK_REWARD,
-            'weighted_score': round(rr_weighted, 1),
-            'ratio': rr_ratio,
-            'is_valid': rr_valid
-        }
-        
-        # ========== 5. CATALYST CHECK (10%) ==========
+        # ========== 4. CATALYST CHECK (10%) ==========
         catalyst_score, catalyst_safe, catalyst_warnings = self.check_catalyst_risk()
         catalyst_weighted = (catalyst_score / 100) * self.WEIGHT_CATALYSTS
         
@@ -614,126 +643,154 @@ class MTFAnalyzer:
             'warnings': catalyst_warnings
         }
         
-        # ========== FINAL CONFIDENCE CALCULATION ==========
-        total_confidence = (
-            tf_score +
-            structure_weighted +
-            volume_weighted +
-            rr_weighted +
-            catalyst_weighted
-        )
-        
-        # Apply conditional penalty if 2/3 alignment
-        if alignment == 'conditional':
-            penalty = total_confidence * 0.25  # 25% reduction
-            total_confidence -= penalty
-            result['warnings'].append(f'Confidence reduced by {penalty:.0f}% (2/3 alignment)')
-        
-        result['direction'] = bias
-        result['confidence'] = round(min(100, max(0, total_confidence)))
-        result['signal_type'] = bias if result['confidence'] >= 60 else 'NO_TRADE'
-        result['entry_type'] = 'MTF_CONFLUENCE'
-        
-        # Always generate entry/stop/target from candle data
+        # ========== GENERATE ENTRY/STOP/TARGET ==========
         if candles_1m:
             last_candle = candles_1m[-1]
             current_price = last_candle.get('close', 0)
             result['current_price'] = current_price
             result['entry'] = current_price
             
-            # ATR-based stop, then calculate target for exact 2:1 R:R
+            # Calculate ATR for stop
             atr = self._calculate_atr(candles_5m)
             if atr < 1:
-                atr = 5  # Minimum ATR fallback
+                atr = 5
             
-            # Calculate stop based on ATR
+            # Stop based on 1.5x ATR
             stop_distance = atr * 1.5
             
             if bias == 'LONG':
-                result['stop'] = stop if stop else round(current_price - stop_distance, 2)
-                actual_stop_dist = abs(current_price - result['stop'])
-                
-                # Multiple profit targets
-                result['target1'] = round(current_price + (actual_stop_dist * 1.5), 2)  # 1.5:1 R:R
-                result['target2'] = round(current_price + (actual_stop_dist * 2.0), 2)  # 2.0:1 R:R
-                result['target'] = result['target2']  # Primary target is 2:1
-                
-                # Calculate pips/points from entry
-                result['target1_pips'] = round(actual_stop_dist * 1.5, 2)
-                result['target2_pips'] = round(actual_stop_dist * 2.0, 2)
-                result['stop_pips'] = round(actual_stop_dist, 2)
-                
-            else:  # SHORT
-                result['stop'] = stop if stop else round(current_price + stop_distance, 2)
-                actual_stop_dist = abs(result['stop'] - current_price)
-                
-                # Multiple profit targets
-                result['target1'] = round(current_price - (actual_stop_dist * 1.5), 2)  # 1.5:1 R:R
-                result['target2'] = round(current_price - (actual_stop_dist * 2.0), 2)  # 2.0:1 R:R
-                result['target'] = result['target2']  # Primary target is 2:1
-                
-                # Calculate pips/points from entry
-                result['target1_pips'] = round(actual_stop_dist * 1.5, 2)
-                result['target2_pips'] = round(actual_stop_dist * 2.0, 2)
-                result['stop_pips'] = round(actual_stop_dist, 2)
+                raw_stop = round(current_price - stop_distance, 2)
+            else:
+                raw_stop = round(current_price + stop_distance, 2)
             
-            # R:R info
-            result['risk_reward'] = TARGET_RR
+            # Cap stop at instrument maximum
+            capped_stop, was_capped, final_stop_dist = cap_stop_loss(ticker, current_price, raw_stop, bias)
+            result['stop'] = capped_stop
+            result['stop_capped'] = was_capped
+            result['stop_pips'] = final_stop_dist
+            
+            if was_capped:
+                ticker_info = get_ticker_info(ticker)
+                result['warnings'].append(f"Stop capped at {ticker_info['max_stop_points']} pts (max for instrument)")
+            
+            # Get tier-based targets
+            if TIME_TIERS_AVAILABLE:
+                t1_rr, t2_rr = get_tier_targets()
+            else:
+                t1_rr, t2_rr = DEFAULT_TARGET1_RR, DEFAULT_TARGET2_RR
+            
+            # Calculate targets based on tier
+            if bias == 'LONG':
+                result['target1'] = round(current_price + (final_stop_dist * t1_rr), 2)
+                result['target2'] = round(current_price + (final_stop_dist * t2_rr), 2)
+            else:
+                result['target1'] = round(current_price - (final_stop_dist * t1_rr), 2)
+                result['target2'] = round(current_price - (final_stop_dist * t2_rr), 2)
+            
+            result['target'] = result['target2']  # Primary target
+            result['target1_pips'] = round(final_stop_dist * t1_rr, 2)
+            result['target2_pips'] = round(final_stop_dist * t2_rr, 2)
+            result['target1_rr'] = t1_rr
+            result['target2_rr'] = t2_rr
+            
             result['targets'] = {
-                'target1': {'price': result['target1'], 'rr': 1.5, 'pips': result['target1_pips']},
-                'target2': {'price': result['target2'], 'rr': 2.0, 'pips': result['target2_pips']}
+                'target1': {'price': result['target1'], 'rr': t1_rr, 'pips': result['target1_pips']},
+                'target2': {'price': result['target2'], 'rr': t2_rr, 'pips': result['target2_pips']}
             }
             
-            # ========== POSITION SIZING ($250 risk) ==========
-            position = calculate_position_size(ticker, result['entry'], result['stop'])
+            # ========== 5. RISK/REWARD (10%) ==========
+            rr_ratio, rr_valid, rr_score = self.calculate_risk_reward(
+                result['entry'], result['stop'], result['target2'], bias
+            )
+            rr_weighted = (rr_score / 100) * self.WEIGHT_RISK_REWARD
+            
+            result['risk_reward'] = rr_ratio
+            result['components']['risk_reward'] = {
+                'score': rr_score,
+                'weight': self.WEIGHT_RISK_REWARD,
+                'weighted_score': round(rr_weighted, 1),
+                'ratio': rr_ratio,
+                'is_valid': rr_valid
+            }
+            
+            # ========== FINAL CONFIDENCE CALCULATION ==========
+            total_confidence = (
+                tf_score +
+                structure_weighted +
+                volume_weighted +
+                rr_weighted +
+                catalyst_weighted
+            )
+            
+            result['direction'] = bias
+            result['confidence'] = round(min(100, max(0, total_confidence)))
+            result['signal_type'] = bias if result['confidence'] >= 60 else 'NO_TRADE'
+            result['entry_type'] = 'MTF_UNANIMOUS'
+            
+            # ========== POSITION SIZING ==========
+            risk_amount = result.get('suggested_risk', DEFAULT_RISK)
+            position = calculate_position_size(ticker, result['entry'], result['stop'], risk_amount)
             result['position_size'] = position
             
-            # ========== ENTRY INSTRUCTIONS ==========
-            # Based on strength, alignment, and momentum
-            tf1_strength = result['components'].get('timeframe', {}).get('tf1', {}).get('strength', 'weak')
-            tf5_strength = result['components'].get('timeframe', {}).get('tf5', {}).get('strength', 'weak')
-            volume_confirming = result['components'].get('volume', {}).get('is_confirming', False)
+            # Calculate potential profits
+            t1_profit = position['contracts'] * (result['target1_pips'] / position['tick_size']) * position['tick_value']
+            t2_profit = position['contracts'] * (result['target2_pips'] / position['tick_size']) * position['tick_value']
+            result['potential_profit_t1'] = round(t1_profit, 2)
+            result['potential_profit_t2'] = round(t2_profit, 2)
             
+            # ========== ENTRY INSTRUCTIONS ==========
             instructions = []
             
+            # Tier-specific guidance
+            if TIME_TIERS_AVAILABLE:
+                tier_name = get_tier_name()
+                if 'EXTENDED' in tier_name.upper() or 'EVENING' in tier_name.upper() or 'PRE-MARKET' in tier_name.upper():
+                    instructions.append("⚠️ EXTENDED HOURS - Use smaller size, expect wider spreads")
+            
             # Entry timing based on momentum
+            tf1_strength = tf1_str
+            tf5_strength = tf5_str
+            
             if tf1_strength == 'strong' and tf5_strength in ['strong', 'moderate']:
-                if volume_confirming:
+                if vol_confirming:
                     instructions.append("🚀 STRONG MOMENTUM - Market order OK")
                 else:
                     instructions.append("⚡ Good momentum - Enter on next candle close")
-            elif alignment == 'full':
+            else:
                 instructions.append("⏳ WAIT FOR PULLBACK to entry level")
                 if bias == 'LONG':
-                    pullback_target = round(current_price - (atr * 0.5), 2)
+                    pullback_target = round(current_price - (atr * 0.3), 2)
                     instructions.append(f"   Look for pullback toward {pullback_target}")
                 else:
-                    pullback_target = round(current_price + (atr * 0.5), 2)
+                    pullback_target = round(current_price + (atr * 0.3), 2)
                     instructions.append(f"   Look for pullback toward {pullback_target}")
-            else:  # conditional alignment
-                instructions.append("⚠️ WAIT FOR CONFIRMATION")
-                instructions.append("   Need diverging timeframe to align first")
             
             # Stop management
-            if result['confidence'] >= 80:
-                instructions.append("📍 Move stop to breakeven at +1R")
+            if result['confidence'] >= 85:
+                instructions.append("📍 Move stop to breakeven at Target 1")
             else:
                 instructions.append("📍 Give trade room - don't move stop early")
             
             # Target management
-            if volume_confirming and alignment == 'full':
-                instructions.append("🎯 Can trail stop for runners")
+            if vol_confirming and tf5_strength == 'strong':
+                instructions.append("🎯 Can trail stop after Target 1")
             else:
-                instructions.append("🎯 Take profit at target - don't get greedy")
+                instructions.append("🎯 Take partial profit at Target 1")
             
             result['entry_instruction'] = "\n".join(instructions)
+            
+            # Add extended hours warning if applicable
+            if TIME_TIERS_AVAILABLE:
+                warning = get_extended_hours_warning()
+                if warning:
+                    result['extended_hours_warning'] = warning
         
         return result
     
     def _calculate_atr(self, candles, period=14):
         """Calculate Average True Range"""
         if not candles or len(candles) < 2:
-            return 10  # Default
+            return 10
         
         trs = []
         for i in range(1, len(candles)):
@@ -753,6 +810,10 @@ class MTFAnalyzer:
     def _build_rationale(self, result):
         """Build human-readable rationale"""
         lines = []
+        
+        # Tier info
+        if result.get('tier_name'):
+            lines.append(f"Session: {result['tier_emoji']} {result['tier_name']} ({result.get('session_window', '')})")
         
         comp = result.get('components', {})
         
@@ -793,5 +854,7 @@ def analyze_ticker(candles_15m, candles_5m, candles_1m, entry=None, stop=None, t
     return result
 
 
-print("✅ SignalCrawler MTF Analyzer loaded")
-print("   Weights: TF=40%, Structure=25%, Volume=15%, R:R=10%, Catalysts=10%")
+print("✅ SignalCrawler v3.0 MTF Analyzer loaded")
+print("   • Unanimous 3/3 alignment required")
+print("   • Time-tiered confidence & targets")
+print("   • Stop capped at instrument max")

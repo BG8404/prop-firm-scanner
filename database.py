@@ -20,10 +20,11 @@ else:
 db_lock = Lock()
 
 # Hardcoded tickers (MNQ, MES, MGC)
+# max_stop_points: Maximum stop loss in points (not ticks) for risk management
 TICKERS = {
-    'MNQ': {'name': 'Micro Nasdaq Futures', 'tick_size': 0.25, 'tick_value': 0.50, 'max_stop_ticks': 30},
-    'MES': {'name': 'Micro S&P 500 Futures', 'tick_size': 0.25, 'tick_value': 1.25, 'max_stop_ticks': 20},
-    'MGC': {'name': 'Micro Gold Futures', 'tick_size': 0.10, 'tick_value': 1.00, 'max_stop_ticks': 40},
+    'MNQ': {'name': 'Micro Nasdaq Futures', 'tick_size': 0.25, 'tick_value': 0.50, 'max_stop_points': 15},
+    'MES': {'name': 'Micro S&P 500 Futures', 'tick_size': 0.25, 'tick_value': 1.25, 'max_stop_points': 6},
+    'MGC': {'name': 'Micro Gold Futures', 'tick_size': 0.10, 'tick_value': 1.00, 'max_stop_points': 10},
 }
 
 

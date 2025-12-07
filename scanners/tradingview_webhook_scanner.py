@@ -109,6 +109,20 @@ from market_regime import get_current_regime, get_regime_suggestions, get_regime
 from mtf_analyzer import analyze_ticker as mtf_analyze, MTFAnalyzer
 from data_fetcher import fetch_backup_data, merge_candles, data_fetcher
 
+# Import time tiers for v3.0
+try:
+    from time_tiers import (
+        get_current_tier, is_trading_blocked, get_tier_targets,
+        get_tier_risk, get_tier_confidence_threshold, get_extended_hours_warning,
+        get_tier_name, get_tier_emoji, get_session_window, get_tier_color,
+        should_show_warning, get_tier_summary
+    )
+    TIME_TIERS_AVAILABLE = True
+    print("✅ Time Tiers v3.0 loaded")
+except ImportError:
+    TIME_TIERS_AVAILABLE = False
+    print("⚠️ time_tiers.py not found - using v2.0 defaults")
+
 # ========= OPENAI CONFIG =========
 # TODO: Move to environment variables for security
 # Get API key from local config (dev) or environment variable (production)
@@ -143,8 +157,8 @@ DISCORD_WEBHOOK_URL = os.environ.get("DISCORD_WEBHOOK_URL", "")
 
 def send_discord_alert(ticker, signal, analysis_details=None):
     """
-    Send trade signal alert to Discord - SignalCrawler v2.0
-    Enhanced format with written MTF analysis and multiple profit targets
+    Send trade signal alert to Discord - SignalCrawler v3.0
+    Time-tiered format with session context and proper position sizing
     """
     if not DISCORD_WEBHOOK_URL:
         print("⚠️ Discord webhook not configured")
@@ -157,26 +171,37 @@ def send_discord_alert(ticker, signal, analysis_details=None):
         stop = signal.get('stop', 0)
         target = signal.get('takeProfit', 0)
         
-        print(f"📱 Sending Discord alert: {ticker} {direction} {confidence}%")
+        # Get time tier info
+        if TIME_TIERS_AVAILABLE:
+            tier_name = get_tier_name()
+            tier_emoji = get_tier_emoji()
+            tier_risk = get_tier_risk()
+            session_window = get_session_window()
+            tier_color = get_tier_color()
+            show_warning = should_show_warning()
+        else:
+            tier_name = "TRADING SESSION"
+            tier_emoji = "📊"
+            tier_risk = 250
+            session_window = ""
+            tier_color = 0x2f3136
+            show_warning = False
         
-        # Get market levels for context
-        market_lvls = get_market_levels()
-        levels_info = market_lvls.get_all_levels(ticker, entry)
-        bias_info = levels_info.get('bias', {})
+        print(f"📱 Sending Discord alert: {ticker} {direction} {confidence}% ({tier_name})")
         
-        # Calculate stop distance for pips display
+        # Calculate stop distance for display
         stop_pips = abs(entry - stop) if entry and stop else 0
         
-        # Emoji based on direction
+        # Direction emoji (override tier color for direction)
         if direction == 'LONG':
-            emoji = "🟢"
-            color = 0x1a472a  # Dark green (like screenshot)
+            dir_emoji = "🟢"
+            color = 0x1a472a  # Dark green
         elif direction == 'SHORT':
-            emoji = "🔴"
+            dir_emoji = "🔴"
             color = 0x8b0000  # Dark red
         else:
-            emoji = "⚪"
-            color = 0x2f3136  # Discord dark
+            dir_emoji = "⚪"
+            color = tier_color
         
         # Get analysis data
         mtf_analysis = {}
@@ -184,6 +209,12 @@ def send_discord_alert(ticker, signal, analysis_details=None):
         target2 = None
         target1_pips = 0
         target2_pips = 0
+        target1_rr = 1.5
+        target2_rr = 2.0
+        stop_capped = False
+        position = {}
+        potential_profit_t1 = 0
+        potential_profit_t2 = 0
         
         if analysis_details:
             mtf_analysis = analysis_details.get('mtf_analysis', {})
@@ -191,84 +222,104 @@ def send_discord_alert(ticker, signal, analysis_details=None):
             target2 = analysis_details.get('target2')
             target1_pips = analysis_details.get('target1_pips', 0)
             target2_pips = analysis_details.get('target2_pips', 0)
+            target1_rr = analysis_details.get('target1_rr', 1.5)
+            target2_rr = analysis_details.get('target2_rr', 2.0)
+            stop_capped = analysis_details.get('stop_capped', False)
+            position = analysis_details.get('position_size', {})
+            potential_profit_t1 = analysis_details.get('potential_profit_t1', 0)
+            potential_profit_t2 = analysis_details.get('potential_profit_t2', 0)
         
-        # Build the TRADE SETUP section
+        # Build title with tier info
+        title = f"{tier_emoji} {tier_name} SIGNAL - {ticker}"
+        
+        # Build TRADE SETUP section
         trade_setup = f"**Direction:** {direction}\n"
         trade_setup += f"**Confidence Level:** {confidence}%"
         
-        # Build Entry Strategy section
+        # Build Entry Strategy section with stop info
         entry_strategy = f"• **Entry Price:** {entry:.2f}\n"
-        entry_strategy += f"• **Stop Loss:** {stop:.2f} ({stop_pips:.1f} pts away)"
+        stop_note = " (capped at max)" if stop_capped else ""
+        entry_strategy += f"• **Stop Loss:** {stop:.2f} ({stop_pips:.1f} pts away){stop_note}"
         
-        # Build Profit Targets section
+        # Build Profit Targets section with tier-based R:R
         profit_targets = ""
         if target1:
-            profit_targets += f"• **Target 1:** {target1:.2f} ({target1_pips:.1f} pts, 1:1.50 R:R)\n"
+            profit_targets += f"• **Target 1:** {target1:.2f} ({target1_pips:.1f} pts, 1:{target1_rr:.1f} R:R)\n"
         if target2:
-            profit_targets += f"• **Target 2:** {target2:.2f} ({target2_pips:.1f} pts, 1:2.00 R:R)"
+            profit_targets += f"• **Target 2:** {target2:.2f} ({target2_pips:.1f} pts, 1:{target2_rr:.1f} R:R)"
         else:
-            profit_targets = f"• **Target:** {target:.2f} (2:1 R:R)"
+            profit_targets = f"• **Target:** {target:.2f}"
         
-        # Build MTF Analysis section (written text like the screenshot)
+        # Build MTF Analysis section
         mtf_text = ""
         if mtf_analysis:
             if mtf_analysis.get('15m'):
-                mtf_text += f"**15m Chart:** {mtf_analysis['15m']}\n\n"
+                mtf_text += f"**15m:** {mtf_analysis['15m']}\n"
             if mtf_analysis.get('5m'):
-                mtf_text += f"**5m Chart:** {mtf_analysis['5m']}\n\n"
+                mtf_text += f"**5m:** {mtf_analysis['5m']}\n"
             if mtf_analysis.get('1m'):
-                mtf_text += f"**1m Chart:** {mtf_analysis['1m']}"
+                mtf_text += f"**1m:** {mtf_analysis['1m']}"
         else:
-            mtf_text = "Analysis data not available"
+            mtf_text = "All timeframes aligned"
         
-        # Truncate MTF text if too long (Discord limit)
-        if len(mtf_text) > 1000:
-            mtf_text = mtf_text[:997] + "..."
+        # Truncate if too long
+        if len(mtf_text) > 800:
+            mtf_text = mtf_text[:797] + "..."
         
-        # Build Discord embed with new format (like screenshot)
+        # Build Position Sizing section
+        contracts = position.get('contracts', 1)
+        actual_risk = position.get('actual_risk', tier_risk)
+        
+        position_text = f"**Suggested Risk:** ${tier_risk}\n"
+        position_text += f"**Position:** {contracts} contract(s) @ ${actual_risk:.0f} risk\n"
+        if potential_profit_t1 > 0:
+            position_text += f"**Potential Profit T1:** ${potential_profit_t1:.0f}"
+        
+        # Signal time and session info
+        now_est = est_now()
+        signal_time = now_est.strftime('%I:%M %p ET')
+        time_info = f"⏰ **Signal Time:** {signal_time}\n"
+        if session_window:
+            time_info += f"🕐 **Session:** {tier_name} ({session_window})"
+        
+        # Build Discord embed
         embed = {
-            "title": f"{emoji} TRADE SETUP - {ticker}",
+            "title": title,
             "color": color,
             "fields": [
-                # Trade Setup
                 {"name": "📋 TRADE SETUP", "value": trade_setup, "inline": False},
-                
-                # Entry Strategy
                 {"name": "🎯 Entry Strategy", "value": entry_strategy, "inline": False},
-                
-                # Profit Targets
                 {"name": "💰 Profit Targets", "value": profit_targets, "inline": False},
-                
-                # Multi-Timeframe Analysis (written text)
                 {"name": "📊 Multi-Timeframe Analysis", "value": mtf_text, "inline": False},
+                {"name": "💵 Position Size", "value": position_text, "inline": False},
+                {"name": "⏰ Timing", "value": time_info, "inline": False},
             ],
-            "footer": {"text": f"SignalCrawler v2.0 • {confidence}% Confidence • $250 Risk"},
+            "footer": {"text": f"SignalCrawler v3.0 • {tier_name} • {confidence}% Confidence"},
             "timestamp": dt.datetime.now().isoformat()
         }
         
-        # Add position sizing if available
-        if analysis_details:
-            position = analysis_details.get('position_size', {})
-            if position:
-                contracts = position.get('contracts', 1)
-                actual_risk = position.get('actual_risk', 250)
-                potential_profit = position.get('potential_profit', 500)
-                embed["fields"].append({
-                    "name": "📊 Position Size",
-                    "value": f"**{contracts} contract(s)** @ $250 risk\nPotential Profit: ${potential_profit:.0f}",
-                    "inline": False
-                })
+        # Add extended hours warning if applicable
+        if show_warning:
+            warning_text = """⚠️ **EXTENDED HOURS NOTICE**
+• Lower liquidity - wider spreads expected
+• Expect 1-3 tick slippage on entry/exit
+• Consider smaller position size"""
+            embed["fields"].append({
+                "name": "⚠️ Caution",
+                "value": warning_text,
+                "inline": False
+            })
         
         # Send to Discord
         payload = {
-            "username": "SignalCrawler v2.0",
+            "username": "SignalCrawler v3.0",
             "embeds": [embed]
         }
         
         response = http_requests.post(DISCORD_WEBHOOK_URL, json=payload, timeout=10)
         
         if response.status_code in [200, 204]:
-            print(f"📱 Discord alert sent for {ticker}")
+            print(f"📱 Discord alert sent for {ticker} ({tier_name})")
             return True
         else:
             print(f"⚠️ Discord error: {response.status_code}")
@@ -278,14 +329,21 @@ def send_discord_alert(ticker, signal, analysis_details=None):
         print(f"⚠️ Discord alert failed: {e}")
         return False
 
-# ========= QUALITY FILTERS (v2.0) =========
-MIN_CONFIDENCE = 80  # Only 80%+ signals now
+# ========= QUALITY FILTERS (v3.0) =========
+# Base confidence - overridden by time tier if available
+MIN_CONFIDENCE = 80  # Default minimum (PRIME time)
 MIN_DISCORD_CONFIDENCE = 80  # Discord alert threshold
 MAX_PRICE_DRIFT_TICKS = 15
 REQUIRE_MOMENTUM_ALIGNMENT = True
-MIN_RISK_REWARD = 2.0  # Exact 2:1 R:R required
+MIN_RISK_REWARD = 1.0  # Lowered since targets are tier-based (1:1 to 2:1)
 ANALYSIS_INTERVAL_MINUTES = 5  # Only auto-analyze every N minutes
 PDH_PDL_BUFFER = 15  # Must be 15+ pts from PDH/PDL
+
+def get_dynamic_min_confidence():
+    """Get minimum confidence based on current time tier"""
+    if TIME_TIERS_AVAILABLE:
+        return get_tier_confidence_threshold()
+    return MIN_CONFIDENCE
 # ==========================================
 
 # Track last analysis time per ticker
@@ -745,17 +803,18 @@ def calculate_risk_reward(entry, stop, target):
 
 def validate_signal(signal, ticker):
     """
-    Run quality checks on AI signal - SignalCrawler v2.0
+    Run quality checks on AI signal - SignalCrawler v3.0
     
     ALL criteria must be met:
-    1. No active news blackout
-    2. Confidence >= 80%
-    3. Valid direction
-    4. Required price levels
-    5. R:R >= 2.0
-    6. Price drift acceptable
-    7. ORB bias alignment (LONG/SHORT must match daily bias)
-    8. PDH/PDL safety (not too close to major levels)
+    1. Not in overnight blocked period (9 PM - 6 AM)
+    2. No active news blackout
+    3. Confidence >= tier threshold (80% PRIME, 85% MIDDAY, 90% EXTENDED)
+    4. Valid direction (3/3 MTF alignment)
+    5. Required price levels
+    6. R:R >= 1.0 (tier-based targets)
+    7. Price drift acceptable
+    8. ORB bias alignment (LONG/SHORT must match daily bias)
+    9. PDH/PDL safety (not too close to major levels)
     """
     reasons = []
     
@@ -766,7 +825,20 @@ def validate_signal(signal, ticker):
     target = signal.get('takeProfit')
     current_price = signal.get('currentPrice')
     
-    # Check 0: News blackout (NEW - blocks all trading during major news)
+    # Check 0: Time tier - block overnight (9 PM - 6 AM)
+    if TIME_TIERS_AVAILABLE:
+        blocked, block_msg = is_trading_blocked()
+        if blocked:
+            reasons.append(f"⛔ OVERNIGHT BLOCKED: {block_msg}")
+            return False, reasons
+        
+        tier_name = get_tier_name()
+        min_conf = get_tier_confidence_threshold()
+    else:
+        tier_name = "DEFAULT"
+        min_conf = MIN_CONFIDENCE
+    
+    # Check 1: News blackout
     is_blackout, news_event = check_news_blackout()
     if is_blackout:
         reasons.append(f"🚫 NEWS BLACKOUT: {news_event['event']} - Clear in {news_event['minutes_until_clear']} min")
@@ -775,28 +847,28 @@ def validate_signal(signal, ticker):
     # Get market levels for bias and level checks
     market_lvls = get_market_levels()
     
-    # Check 1: Confidence (80%+ required)
-    if confidence < MIN_CONFIDENCE:
-        reasons.append(f"❌ Confidence {confidence}% below threshold {MIN_CONFIDENCE}%")
+    # Check 2: Confidence (tier-based threshold)
+    if confidence < min_conf:
+        reasons.append(f"❌ Confidence {confidence}% below {tier_name} threshold {min_conf}%")
         return False, reasons
     
-    # Check 2: Direction
+    # Check 3: Direction (must be valid LONG/SHORT from 3/3 alignment)
     if direction == "no_trade" or direction == "STAY_AWAY":
-        reasons.append("⚠️  AI suggests no trade")
+        reasons.append("⚠️  No trade signal (MTF not aligned)")
         return False, reasons
     
-    # Check 3: Required fields
+    # Check 4: Required fields
     if entry is None or stop is None or target is None or current_price is None:
         reasons.append("❌ Missing required price levels")
         return False, reasons
     
-    # Check 4: R:R (2:1 minimum)
+    # Check 5: R:R (1.0 minimum since targets are tier-based)
     rr = calculate_risk_reward(entry, stop, target)
     if rr < MIN_RISK_REWARD:
         reasons.append(f"❌ R:R {rr:.2f} below minimum {MIN_RISK_REWARD}")
         return False, reasons
     
-    # Check 5: Price drift
+    # Check 6: Price drift
     tick_size = get_tick_size(ticker)
     drift = abs(float(current_price) - float(entry))
     drift_ticks = drift / tick_size
@@ -1486,11 +1558,16 @@ def run_analysis(ticker_symbol=None, send_alerts=False):
                     criteria_failed.append(f"❌ Levels: {level_reason}")
                     level_safe = False
                 
-                # Check confidence
-                if confidence >= MIN_CONFIDENCE:
-                    criteria_met.append(f"✅ Confidence: {confidence}% >= {MIN_CONFIDENCE}%")
+                # Check confidence (tier-based)
+                min_conf = get_dynamic_min_confidence()
+                tier_info = ""
+                if TIME_TIERS_AVAILABLE:
+                    tier_info = f" ({get_tier_name()})"
+                
+                if confidence >= min_conf:
+                    criteria_met.append(f"✅ Confidence: {confidence}% >= {min_conf}%{tier_info}")
                 else:
-                    criteria_failed.append(f"❌ Confidence: {confidence}% < {MIN_CONFIDENCE}%")
+                    criteria_failed.append(f"❌ Confidence: {confidence}% < {min_conf}%{tier_info}")
                 
                 # Check R:R
                 rr = mtf_result.get('risk_reward', 0)
@@ -1498,8 +1575,15 @@ def run_analysis(ticker_symbol=None, send_alerts=False):
                     criteria_met.append(f"✅ R:R: {rr}:1 >= {MIN_RISK_REWARD}:1")
                 else:
                     criteria_failed.append(f"❌ R:R: {rr}:1 < {MIN_RISK_REWARD}:1")
+                
+                # Check if trading blocked (overnight)
+                if TIME_TIERS_AVAILABLE:
+                    blocked, block_msg = is_trading_blocked()
+                    if blocked:
+                        criteria_failed.append(f"⛔ Blocked: {block_msg}")
             
-            all_criteria_met = len(criteria_failed) == 0 and confidence >= MIN_CONFIDENCE and direction in ('LONG', 'SHORT')
+            min_conf = get_dynamic_min_confidence()
+            all_criteria_met = len(criteria_failed) == 0 and confidence >= min_conf and direction in ('LONG', 'SHORT')
             
             # Get timeframe trends from MTF analysis
             tf_data = mtf_result.get('components', {}).get('timeframe', {})
@@ -1571,7 +1655,7 @@ def run_analysis(ticker_symbol=None, send_alerts=False):
                     add_log(f"📱 v2.0 Alert: {ticker} {direction} {confidence}% - {cooldown_reason}", "success")
                 else:
                     add_log(f"🔇 Skipped alert: {ticker} {direction} {confidence}% - {cooldown_reason}", "info")
-            elif send_alerts and direction in ('LONG', 'SHORT') and confidence >= MIN_CONFIDENCE:
+            elif send_alerts and direction in ('LONG', 'SHORT') and confidence >= get_dynamic_min_confidence():
                 # Log why not alerted
                 add_log(f"⚠️ {ticker} {direction} {confidence}% - Criteria failed: {', '.join(criteria_failed)}", "warning")
         
@@ -2604,7 +2688,7 @@ def webhook():
                     print(f"   {reason}")
                 
                 # v2.0: Only alert when ALL criteria are met
-                if is_valid and confidence >= MIN_CONFIDENCE:
+                if is_valid and confidence >= get_dynamic_min_confidence():
                     print(f"\n✅ ALL CRITERIA MET: {ticker} {direction.upper()} {confidence}%")
                     
                     entry_price = signal.get('entry') or signal.get('currentPrice') or 0
@@ -2745,12 +2829,19 @@ def open_browser():
 
 if __name__ == '__main__':
     print("\n" + "="*60)
-    print("🕷️ SIGNALCRAWLER v2.0 STARTING")
+    print("🕷️ SIGNALCRAWLER v3.0 STARTING")
     print("="*60)
-    print("📋 v2.0 Settings:")
-    print(f"   • Min Confidence: {MIN_CONFIDENCE}%")
+    print("📋 v3.0 Settings:")
+    if TIME_TIERS_AVAILABLE:
+        print(f"   • Time Tiers: ENABLED")
+        print(f"   • Current Tier: {get_tier_name()} ({get_tier_confidence_threshold()}% min)")
+        print(f"   • Suggested Risk: ${get_tier_risk()}")
+        print(get_tier_summary())
+    else:
+        print(f"   • Time Tiers: DISABLED (using defaults)")
+        print(f"   • Min Confidence: {MIN_CONFIDENCE}%")
     print(f"   • Min R:R: {MIN_RISK_REWARD}:1")
-    print(f"   • Risk per Trade: $250")
+    print(f"   • Unanimous 3/3 MTF alignment required")
     print(f"   • PDH/PDL Buffer: {PDH_PDL_BUFFER} pts")
     print(f"   • Analysis Interval: {ANALYSIS_INTERVAL_MINUTES} min")
     print(f"   • ORB Bias Required: Yes")
