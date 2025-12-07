@@ -459,6 +459,34 @@ async function deleteTrade(tradeId) {
     }
 }
 
+// Clear all database data
+async function clearAllData() {
+    if (!confirm('⚠️ Clear ALL trades and signals?\n\nThis will:\n• Delete all trades from the journal\n• Reset win/loss stats\n• Clear daily stats\n\nThis cannot be undone!')) return;
+    
+    try {
+        addLog('🗑️ Clearing database...', 'warning');
+        
+        const response = await fetch('/api/clear-database', {
+            method: 'POST'
+        });
+        
+        if (response.ok) {
+            addLog('✅ Database cleared! Fresh start.', 'success');
+            // Clear local state
+            loadedTradeIds.clear();
+            // Refresh all data
+            fetchTradeJournal();
+            fetchPerformance();
+            loadApexStatus();
+        } else {
+            const err = await response.json();
+            addLog('❌ Failed to clear: ' + (err.error || 'Unknown error'), 'error');
+        }
+    } catch (error) {
+        addLog('❌ Error: ' + error.message, 'error');
+    }
+}
+
 // Apex Rules
 async function loadApexStatus() {
     try {

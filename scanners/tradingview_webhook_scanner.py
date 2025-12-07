@@ -1728,6 +1728,7 @@ def api_check_outcomes():
 @app.route('/api/trade/<int:trade_id>/outcome', methods=['POST'])
 def mark_trade_outcome(trade_id):
     """Manually mark a trade as WIN or LOSS"""
+    conn = None
     try:
         from database import get_connection, db_lock
         import time as time_module
@@ -1738,13 +1739,15 @@ def mark_trade_outcome(trade_id):
         if outcome not in ['WIN', 'LOSS']:
             return jsonify({"error": "Outcome must be WIN or LOSS"}), 400
         
+        pnl = 0
         # Use database lock with retry logic
-        max_retries = 3
+        max_retries = 5
         for attempt in range(max_retries):
             try:
                 with db_lock:
                     conn = get_connection()
-                    conn.execute("PRAGMA busy_timeout = 5000")  # 5 second timeout
+                    conn.execute("PRAGMA busy_timeout = 10000")  # 10 second timeout
+                    conn.execute("PRAGMA journal_mode = WAL")  # Better concurrency
                     cursor = conn.cursor()
                     
                     # Get the trade to calculate P&L (column names: entry, stop, target)
@@ -1781,24 +1784,34 @@ def mark_trade_outcome(trade_id):
                         WHERE id = ?
                     ''', (outcome, exit_price, pnl, trade_id))
                     
-                    # Update strategy version stats
-                    cursor.execute(f'''
-                        UPDATE strategy_versions 
-                        SET {outcome.lower()}s = {outcome.lower()}s + 1,
-                            win_rate = CASE WHEN (wins + losses) > 0 
-                                       THEN ROUND(100.0 * wins / (wins + losses), 1) 
-                                       ELSE NULL END
-                        WHERE is_active = 1
-                    ''')
+                    # Update strategy version stats (ignore errors)
+                    try:
+                        cursor.execute(f'''
+                            UPDATE strategy_versions 
+                            SET {outcome.lower()}s = {outcome.lower()}s + 1,
+                                win_rate = CASE WHEN (wins + losses) > 0 
+                                           THEN ROUND(100.0 * wins / (wins + losses), 1) 
+                                           ELSE NULL END
+                            WHERE is_active = 1
+                        ''')
+                    except:
+                        pass  # Non-critical
                     
                     conn.commit()
                     conn.close()
+                    conn = None
                     break  # Success, exit retry loop
                     
             except Exception as e:
+                if conn:
+                    try:
+                        conn.close()
+                    except:
+                        pass
+                    conn = None
                 if "locked" in str(e).lower() and attempt < max_retries - 1:
                     print(f"⚠️ Database locked, retry {attempt + 1}/{max_retries}")
-                    time_module.sleep(0.5)  # Wait before retry
+                    time_module.sleep(1.0)  # Wait longer before retry
                 else:
                     raise
         
@@ -1806,23 +1819,31 @@ def mark_trade_outcome(trade_id):
         return jsonify({"status": "success", "outcome": outcome, "pnl": pnl})
         
     except Exception as e:
+        if conn:
+            try:
+                conn.close()
+            except:
+                pass
+        print(f"❌ Error marking trade {trade_id}: {e}")
         return jsonify({"error": str(e)}), 500
 
 
 @app.route('/api/trade/<int:trade_id>', methods=['DELETE'])
 def delete_trade(trade_id):
     """Delete a trade (user didn't take it)"""
+    conn = None
     try:
         from database import get_connection, db_lock
         import time as time_module
         
         # Use database lock with retry logic
-        max_retries = 3
+        max_retries = 5
         for attempt in range(max_retries):
             try:
                 with db_lock:
                     conn = get_connection()
-                    conn.execute("PRAGMA busy_timeout = 5000")
+                    conn.execute("PRAGMA busy_timeout = 10000")
+                    conn.execute("PRAGMA journal_mode = WAL")
                     cursor = conn.cursor()
                     
                     # Delete the trade and its features
@@ -1831,12 +1852,19 @@ def delete_trade(trade_id):
                     
                     conn.commit()
                     conn.close()
+                    conn = None
                     break  # Success
                     
             except Exception as e:
+                if conn:
+                    try:
+                        conn.close()
+                    except:
+                        pass
+                    conn = None
                 if "locked" in str(e).lower() and attempt < max_retries - 1:
                     print(f"⚠️ Database locked, retry {attempt + 1}/{max_retries}")
-                    time_module.sleep(0.5)
+                    time_module.sleep(1.0)
                 else:
                     raise
         
@@ -1844,34 +1872,78 @@ def delete_trade(trade_id):
         return jsonify({"status": "success", "message": f"Trade #{trade_id} deleted"})
         
     except Exception as e:
+        if conn:
+            try:
+                conn.close()
+            except:
+                pass
+        print(f"❌ Error deleting trade {trade_id}: {e}")
         return jsonify({"error": str(e)}), 500
 
 
 @app.route('/api/clear-database', methods=['POST'])
 def clear_database():
     """Clear all signals and start fresh"""
+    conn = None
     try:
-        from database import get_connection
-        conn = get_connection()
-        cursor = conn.cursor()
+        from database import get_connection, db_lock
+        import time as time_module
         
-        # Clear signals
-        cursor.execute('DELETE FROM signal_recommendations')
-        cursor.execute('DELETE FROM signal_features')
-        cursor.execute('DELETE FROM daily_stats')
+        max_retries = 5
+        for attempt in range(max_retries):
+            try:
+                with db_lock:
+                    conn = get_connection()
+                    conn.execute("PRAGMA busy_timeout = 10000")
+                    conn.execute("PRAGMA journal_mode = WAL")
+                    cursor = conn.cursor()
+                    
+                    # Clear signals
+                    cursor.execute('DELETE FROM signal_recommendations')
+                    cursor.execute('DELETE FROM signal_features')
+                    cursor.execute('DELETE FROM daily_stats')
+                    
+                    # Reset strategy version stats
+                    try:
+                        cursor.execute('''
+                            UPDATE strategy_versions 
+                            SET signals_generated = 0, wins = 0, losses = 0, win_rate = NULL
+                        ''')
+                    except:
+                        pass  # Non-critical
+                    
+                    conn.commit()
+                    conn.close()
+                    conn = None
+                    break  # Success
+                    
+            except Exception as e:
+                if conn:
+                    try:
+                        conn.close()
+                    except:
+                        pass
+                    conn = None
+                if "locked" in str(e).lower() and attempt < max_retries - 1:
+                    print(f"⚠️ Database locked, retry {attempt + 1}/{max_retries}")
+                    time_module.sleep(1.0)
+                else:
+                    raise
         
-        # Reset strategy version stats
-        cursor.execute('''
-            UPDATE strategy_versions 
-            SET signals_generated = 0, wins = 0, losses = 0, win_rate = NULL
-        ''')
-        
-        conn.commit()
-        conn.close()
+        # Also clear in-memory state
+        dashboard_stats["recent_signals"].clear()
+        dashboard_stats["signal_count"] = 0
         
         add_log("🗑️ Database cleared - fresh start!", "warning")
         return jsonify({"status": "success", "message": "Database cleared!"})
+        
     except Exception as e:
+        if conn:
+            try:
+                conn.close()
+            except:
+                pass
+        print(f"❌ Error clearing database: {e}")
         return jsonify({"error": str(e)}), 500
 
 
