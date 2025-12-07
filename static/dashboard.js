@@ -431,7 +431,7 @@ async function markTrade(tradeId, outcome) {
         
         if (response.ok) {
             addLog('Trade #' + tradeId + ' marked as ' + outcome, outcome === 'WIN' ? 'success' : 'error');
-            loadTrades();
+            fetchTradeJournal();
         } else {
             addLog('Failed to update trade #' + tradeId, 'error');
         }
@@ -450,7 +450,7 @@ async function deleteTrade(tradeId) {
         
         if (response.ok) {
             addLog('Trade #' + tradeId + ' deleted', 'info');
-            loadTrades();
+            fetchTradeJournal();
         } else {
             addLog('Failed to delete trade #' + tradeId, 'error');
         }
