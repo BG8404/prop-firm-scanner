@@ -256,10 +256,10 @@ async function fetchStatus() {
     }
 }
 
-// Add signal to table
+// Add signal to table (disabled - Recent Signals removed)
 function addSignal(signal) {
-    const tbody = document.getElementById('signalsBody');
-    if (tbody.querySelector('.empty-state')) tbody.innerHTML = '';
+    // Recent Signals section removed - signals tracked via Discord alerts
+    return;
 
     const confidenceClass = signal.confidence >= 70 ? 'high' : signal.confidence >= 50 ? 'medium' : 'low';
     const directionClass = signal.direction.toLowerCase().replace('_', '');
@@ -418,7 +418,6 @@ function getTradeRowHTML(trade) {
     }
     
     return `
-        <td><input type="checkbox" class="trade-checkbox" data-trade-id="${trade.id}" onchange="updateSelectedCount()"></td>
         <td><span class="time-value">${timeDisplay}</span></td>
         <td><span class="ticker-badge">${trade.ticker}</span></td>
         <td><span class="direction-badge ${directionClass}">${directionIcon} ${(trade.direction || '').toUpperCase()}</span></td>
@@ -426,8 +425,6 @@ function getTradeRowHTML(trade) {
         <td><span class="price-value">${trade.entry_price?.toFixed(2) || '--'}</span></td>
         <td><span class="price-value">${trade.stop_price?.toFixed(2) || '--'}</span></td>
         <td><span class="price-value">${trade.target_price?.toFixed(2) || '--'}</span></td>
-        <td><span class="status-badge ${outcomeClass}">${outcomeText}</span></td>
-        <td>${getTradeActions(trade)}</td>
     `;
 }
 
