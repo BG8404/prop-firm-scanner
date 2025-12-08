@@ -350,6 +350,28 @@ async function fetchTradeJournal() {
     }
 }
 
+// Convert UTC timestamp to EST display format
+function formatTimeEST(timestamp) {
+    if (!timestamp) return '--';
+    try {
+        // Parse the timestamp (assumed UTC from database)
+        const date = new Date(timestamp + ' UTC');
+        // Convert to EST
+        const estOptions = { 
+            timeZone: 'America/New_York',
+            month: '2-digit',
+            day: '2-digit',
+            hour: '2-digit',
+            minute: '2-digit',
+            hour12: true
+        };
+        return date.toLocaleString('en-US', estOptions).replace(',', '');
+    } catch (e) {
+        // Fallback: just show time portion
+        return timestamp?.split(' ')[1] || '--';
+    }
+}
+
 function getTradeRowHTML(trade) {
     const outcomeClass = trade.outcome === 'win' || trade.outcome === 'WIN' ? 'ok' : 
                          trade.outcome === 'loss' || trade.outcome === 'LOSS' ? 'critical' : 'warning';
@@ -365,6 +387,9 @@ function getTradeRowHTML(trade) {
     // Confidence display
     const confidence = trade.confidence || trade.confidence_score || 0;
     const confClass = confidence >= 80 ? 'green' : confidence >= 70 ? 'yellow' : 'red';
+    
+    // Format time in EST with date
+    const timeDisplay = formatTimeEST(trade.timestamp);
     
     // Live direction indicator for pending trades
     let liveIndicator = '--';
@@ -393,7 +418,8 @@ function getTradeRowHTML(trade) {
     }
     
     return `
-        <td><span class="time-value">${trade.timestamp?.split(' ')[1] || '--'}</span></td>
+        <td><input type="checkbox" class="trade-checkbox" data-trade-id="${trade.id}" onchange="updateSelectedCount()"></td>
+        <td><span class="time-value">${timeDisplay}</span></td>
         <td><span class="ticker-badge">${trade.ticker}</span></td>
         <td><span class="direction-badge ${directionClass}">${directionIcon} ${(trade.direction || '').toUpperCase()}</span></td>
         <td><span class="price-value" style="color: var(--accent-${confClass})">${confidence}%</span></td>
@@ -485,6 +511,85 @@ async function clearAllData() {
     } catch (error) {
         addLog('❌ Error: ' + error.message, 'error');
     }
+}
+
+// Toggle select all checkboxes
+function toggleSelectAll(checkbox) {
+    const checkboxes = document.querySelectorAll('.trade-checkbox');
+    checkboxes.forEach(cb => cb.checked = checkbox.checked);
+    updateSelectedCount();
+}
+
+// Update selected count and show/hide delete button
+function updateSelectedCount() {
+    const checkboxes = document.querySelectorAll('.trade-checkbox:checked');
+    const count = checkboxes.length;
+    const btn = document.getElementById('deleteSelectedBtn');
+    const countSpan = document.getElementById('selectedCount');
+    
+    if (countSpan) countSpan.textContent = count;
+    if (btn) btn.style.display = count > 0 ? 'inline-flex' : 'none';
+    
+    // Update select all checkbox state
+    const allCheckboxes = document.querySelectorAll('.trade-checkbox');
+    const selectAll = document.getElementById('selectAllTrades');
+    if (selectAll && allCheckboxes.length > 0) {
+        selectAll.checked = checkboxes.length === allCheckboxes.length;
+        selectAll.indeterminate = checkboxes.length > 0 && checkboxes.length < allCheckboxes.length;
+    }
+}
+
+// Delete all selected trades
+async function deleteSelectedTrades() {
+    const checkboxes = document.querySelectorAll('.trade-checkbox:checked');
+    const tradeIds = Array.from(checkboxes).map(cb => cb.dataset.tradeId);
+    
+    if (tradeIds.length === 0) {
+        addLog('No trades selected', 'warning');
+        return;
+    }
+    
+    if (!confirm(`Delete ${tradeIds.length} selected trade(s)?\n\nThis cannot be undone.`)) return;
+    
+    addLog(`🗑️ Deleting ${tradeIds.length} trades...`, 'warning');
+    
+    let successCount = 0;
+    let failCount = 0;
+    
+    for (const tradeId of tradeIds) {
+        try {
+            const response = await fetch('/api/trade/' + tradeId, {
+                method: 'DELETE'
+            });
+            
+            if (response.ok) {
+                successCount++;
+                loadedTradeIds.delete(parseInt(tradeId));
+            } else {
+                failCount++;
+            }
+        } catch (error) {
+            failCount++;
+        }
+        
+        // Small delay between requests to avoid overwhelming the database
+        await new Promise(resolve => setTimeout(resolve, 100));
+    }
+    
+    if (successCount > 0) {
+        addLog(`✅ Deleted ${successCount} trade(s)`, 'success');
+    }
+    if (failCount > 0) {
+        addLog(`⚠️ Failed to delete ${failCount} trade(s)`, 'error');
+    }
+    
+    // Reset select all checkbox
+    const selectAll = document.getElementById('selectAllTrades');
+    if (selectAll) selectAll.checked = false;
+    
+    // Refresh the trade journal
+    fetchTradeJournal();
+    fetchPerformance();
 }
 
 // Apex Rules

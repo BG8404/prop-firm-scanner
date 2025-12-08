@@ -238,16 +238,22 @@
                 <h2 class="section-title">📔 Trade Journal</h2>
                     <p class="section-subtitle">Auto-tracked signals with outcomes</p>
             </div>
+            <div style="display: flex; gap: 8px;">
+                <button class="btn btn-outline" onclick="deleteSelectedTrades()" id="deleteSelectedBtn" style="border-color: #ff4466; color: #ff4466; display: none;">
+                    🗑️ Delete Selected (<span id="selectedCount">0</span>)
+                </button>
+            </div>
         </div>
             <div class="signals-container" style="margin-bottom: 24px;">
             <table class="signals-table">
                 <thead>
                     <tr>
-                            <th>Time</th><th>Ticker</th><th>Direction</th><th>Conf</th><th>Entry</th><th>Stop</th><th>Target</th><th>Status</th><th>Actions</th>
+                            <th style="width: 30px;"><input type="checkbox" id="selectAllTrades" onchange="toggleSelectAll(this)" title="Select All"></th>
+                            <th>Time (EST)</th><th>Ticker</th><th>Direction</th><th>Conf</th><th>Entry</th><th>Stop</th><th>Target</th><th>Status</th><th>Actions</th>
                     </tr>
                 </thead>
                 <tbody id="tradeJournalBody">
-                        <tr><td colspan="9"><div class="empty-state"><div class="empty-state-icon">📔</div><div class="empty-state-text">No trades logged yet</div></div></td></tr>
+                        <tr><td colspan="10"><div class="empty-state"><div class="empty-state-icon">📔</div><div class="empty-state-text">No trades logged yet</div></div></td></tr>
                 </tbody>
             </table>
         </div>
