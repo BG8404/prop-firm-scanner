@@ -232,6 +232,36 @@
             </div>
         </div>
 
+        <!-- Log Results Form -->
+        <div class="settings-section" style="margin-bottom: 24px; background: linear-gradient(135deg, rgba(0, 255, 136, 0.12), rgba(255, 68, 102, 0.08)); border-color: rgba(0, 255, 136, 0.4);">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
+                <div>
+                    <span style="font-weight: 600; font-size: 1.1em;">📊 Log Today's Results</span>
+                    <p style="margin: 4px 0 0 0; opacity: 0.7; font-size: 0.85em;">Enter your wins/losses to help AI learn</p>
+                </div>
+                <span id="logResultsStatus" style="font-size: 0.85em; color: var(--text-muted);"></span>
+            </div>
+            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 16px; align-items: end;">
+                <div>
+                    <label style="font-size: 0.75rem; color: var(--text-muted); display: block; margin-bottom: 4px;">✅ Wins</label>
+                    <input type="number" id="logWins" min="0" value="0" class="setting-input" style="width: 100%; text-align: center; font-size: 1.2rem; font-weight: 600; color: var(--accent-green);">
+                </div>
+                <div>
+                    <label style="font-size: 0.75rem; color: var(--text-muted); display: block; margin-bottom: 4px;">❌ Losses</label>
+                    <input type="number" id="logLosses" min="0" value="0" class="setting-input" style="width: 100%; text-align: center; font-size: 1.2rem; font-weight: 600; color: var(--accent-red);">
+                </div>
+                <div>
+                    <label style="font-size: 0.75rem; color: var(--text-muted); display: block; margin-bottom: 4px;">💵 P&L ($)</label>
+                    <input type="number" id="logPnl" step="0.01" value="0" class="setting-input" style="width: 100%; text-align: center; font-size: 1.2rem; font-weight: 600;">
+                </div>
+                <div>
+                    <button class="btn btn-primary" onclick="submitResults()" id="submitResultsBtn" style="width: 100%; background: linear-gradient(135deg, #00ff88, #00d4ff); color: #0a0f1a; font-weight: 600; padding: 12px;">
+                        📤 Submit
+                    </button>
+                </div>
+            </div>
+        </div>
+
         <!-- Trade Journal (Simplified - view only) -->
         <div class="section-header">
             <div>

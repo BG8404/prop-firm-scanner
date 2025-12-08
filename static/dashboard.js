@@ -482,6 +482,64 @@ async function deleteTrade(tradeId) {
     }
 }
 
+// Submit daily results for AI learning
+async function submitResults() {
+    const wins = parseInt(document.getElementById('logWins').value) || 0;
+    const losses = parseInt(document.getElementById('logLosses').value) || 0;
+    const pnl = parseFloat(document.getElementById('logPnl').value) || 0;
+    const btn = document.getElementById('submitResultsBtn');
+    const status = document.getElementById('logResultsStatus');
+    
+    if (wins === 0 && losses === 0) {
+        status.textContent = '⚠️ Enter at least one win or loss';
+        status.style.color = 'var(--accent-yellow)';
+        return;
+    }
+    
+    btn.disabled = true;
+    btn.textContent = '⏳ Submitting...';
+    status.textContent = '';
+    
+    try {
+        const response = await fetch('/api/log-results', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                wins: wins,
+                losses: losses,
+                pnl_dollars: pnl
+            })
+        });
+        
+        const data = await response.json();
+        
+        if (response.ok) {
+            status.textContent = '✅ ' + data.message;
+            status.style.color = 'var(--accent-green)';
+            addLog('📊 Results logged: ' + wins + 'W / ' + losses + 'L', 'success');
+            
+            // Reset form
+            document.getElementById('logWins').value = '0';
+            document.getElementById('logLosses').value = '0';
+            document.getElementById('logPnl').value = '0';
+            
+            // Refresh performance stats
+            fetchPerformance();
+        } else {
+            status.textContent = '❌ ' + (data.error || 'Failed to submit');
+            status.style.color = 'var(--accent-red)';
+            addLog('❌ Failed to log results: ' + (data.error || 'Unknown error'), 'error');
+        }
+    } catch (error) {
+        status.textContent = '❌ Connection error';
+        status.style.color = 'var(--accent-red)';
+        addLog('❌ Error: ' + error.message, 'error');
+    }
+    
+    btn.disabled = false;
+    btn.textContent = '📤 Submit';
+}
+
 // Clear all database data
 async function clearAllData() {
     if (!confirm('⚠️ Clear ALL trades and signals?\n\nThis will:\n• Delete all trades from the journal\n• Reset win/loss stats\n• Clear daily stats\n\nThis cannot be undone!')) return;

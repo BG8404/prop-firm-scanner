@@ -1947,6 +1947,83 @@ def clear_database():
         return jsonify({"error": str(e)}), 500
 
 
+@app.route('/api/log-results', methods=['POST'])
+def log_results():
+    """
+    Simple endpoint to log daily trading results.
+    Used for AI learning when dashboard buttons don't work.
+    """
+    conn = None
+    try:
+        from database import get_connection, db_lock
+        
+        data = request.get_json(force=True, silent=True) or {}
+        wins = int(data.get('wins', 0))
+        losses = int(data.get('losses', 0))
+        pnl_ticks = float(data.get('pnl_ticks', 0))
+        pnl_dollars = float(data.get('pnl_dollars', 0))
+        notes = data.get('notes', '')
+        
+        if wins == 0 and losses == 0:
+            return jsonify({"error": "Please enter at least one win or loss"}), 400
+        
+        today = est_now().strftime('%Y-%m-%d')
+        
+        with db_lock:
+            conn = get_connection()
+            conn.execute("PRAGMA busy_timeout = 10000")
+            conn.execute("PRAGMA journal_mode = WAL")
+            cursor = conn.cursor()
+            
+            # Check if we already have an entry for today
+            cursor.execute('SELECT id, wins, losses, total_pnl_ticks FROM daily_stats WHERE date = ?', (today,))
+            existing = cursor.fetchone()
+            
+            if existing:
+                # Update existing entry
+                new_wins = existing['wins'] + wins
+                new_losses = existing['losses'] + losses
+                new_pnl = (existing['total_pnl_ticks'] or 0) + pnl_ticks
+                cursor.execute('''
+                    UPDATE daily_stats 
+                    SET wins = ?, losses = ?, total_pnl_ticks = ?, total_pnl_dollars = total_pnl_dollars + ?
+                    WHERE id = ?
+                ''', (new_wins, new_losses, new_pnl, pnl_dollars, existing['id']))
+                message = f"Updated today's stats: {new_wins}W / {new_losses}L"
+            else:
+                # Insert new entry
+                cursor.execute('''
+                    INSERT INTO daily_stats (date, wins, losses, total_pnl_ticks, total_pnl_dollars)
+                    VALUES (?, ?, ?, ?, ?)
+                ''', (today, wins, losses, pnl_ticks, pnl_dollars))
+                message = f"Logged today's results: {wins}W / {losses}L"
+            
+            conn.commit()
+            conn.close()
+            conn = None
+        
+        add_log(f"📊 {message}", "success")
+        print(f"✅ {message}")
+        
+        return jsonify({
+            "status": "success",
+            "message": message,
+            "date": today,
+            "wins": wins,
+            "losses": losses,
+            "pnl_ticks": pnl_ticks
+        })
+        
+    except Exception as e:
+        if conn:
+            try:
+                conn.close()
+            except:
+                pass
+        print(f"❌ Error logging results: {e}")
+        return jsonify({"error": str(e)}), 500
+
+
 @app.route('/api/test-discord', methods=['POST', 'GET'])
 def test_discord():
     """Send a test Discord alert"""
